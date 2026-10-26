@@ -1597,6 +1597,7 @@ async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, esconder
         const txt = textoDados(out);
         const el = cred.querySelector(".g3d-attr");
         if (el.textContent !== txt) el.textContent = txt;
+        if (cred.hidden && !api.noite && !falhou && g.visible && tiles.stats.visible > 0 && txt) cred.hidden = false;
         if (!cred.hidden) posCred();
         const st = tiles.stats, pend = st.queued + st.downloading + st.parsing;
         if (!mostrando) {
@@ -1726,7 +1727,7 @@ async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, esconder
       if (api.noite === v) return;
       api.noite = v;
       g.visible = !v;
-      cred.hidden = v || !(mostrando && !falhou);
+      cred.hidden = v || falhou || !(mostrando || tiles.stats.visible > 0);
     },
     definirSol(el) {
       s.definirLuz(el);

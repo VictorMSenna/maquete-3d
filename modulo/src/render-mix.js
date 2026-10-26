@@ -77,6 +77,7 @@ uniform vec3 pufeCor;
 uniform float pufeLumP;
 uniform float camaFator;
 uniform float pufeModelo;
+uniform float corrimao;
 uniform float fatorFora;
 uniform float srgb;
 uniform float veuFora;
@@ -181,6 +182,7 @@ void main(){
     x = mix(x, xp, foP.y);
   }
   else if (camaFator < 0.999 && usaFora > 0.5 && modoLum < 0.5) { float cb = texture2D(tFora, vUv).b; x *= mix(1.0, camaFator, cb * (1.0 - clamp((pufeNoite - 1.0) / 0.6, 0.0, 1.0))); } // by day only: at night the spots already model the pillows
+  else if (corrimao > 0.5 && usaFora > 0.5 && modoLum < 0.5) { float cr = texture2D(tFora, vUv).b; if (cr > 0.0) x = mix(x, dot(x, vec3(0.2126, 0.7152, 0.0722)) * 0.85 * corLuz, cr); }
   if (modoLum > 0.5) { float l0 = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6); float v = clamp((log2(l0) + 16.0) / 20.0, 0.0, 1.0) * 255.0; gl_FragColor = vec4(floor(v) / 255.0, 1.0 - fo, fract(v), 1.0); return; } // 08/10: 16 bits (R hi + B lo) - 8 bits made rings on smooth walls
   if (usaFora > 0.5) x *= mix(1.0, fatorFora, fo); // v4: window exposed on its own
   if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUv); float r = exp2(clamp((lG - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
@@ -333,7 +335,7 @@ function prepassoAcesa(r, U) {
   return a.rt.texture;
 }
 class MisturaPonto {
-  constructor(renderer, ponto, base, { larguraMax = 4096, SOL, unidade = null, finalRender = null, luzes = [], pufe = {}, cama = {} } = {}) {
+  constructor(renderer, ponto, base, { larguraMax = 4096, SOL, unidade = null, finalRender = null, luzes = [], pufe = {}, cama = {}, corrimao = {} } = {}) {
     this.luzesOrdem = luzes;
     this.r = renderer;
     this.p = ponto;
@@ -382,6 +384,8 @@ class MisturaPonto {
         pufeCor: { value: new THREE.Vector3(...pufe.cor || [0, 0, 0]) },
         pufeLumP: { value: +new URLSearchParams(location.search).get("pufeL") || pufe.lumAntigo || 1 },
         pufeModelo: { value: (pufe.modeloNoite || []).includes(ponto.id) ? 1 : 0 },
+        corrimao: { value: new URLSearchParams(location.search).get("corrimao") !== "0" && (corrimao.pontos || []).includes(ponto.id) ? 1 : 0 },
+        /* ?corrimao=0 = before (tests) */
         camaFator: { value: +new URLSearchParams(location.search).get("cama") || cama.fator || 1 },
         /* pufeAlb = sRGB (46, 50, 64) linear */
         fatorFora: { value: 1 },

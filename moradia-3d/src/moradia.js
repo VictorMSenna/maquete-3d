@@ -1,6 +1,6 @@
 // Demo de moradia (Fabrica-3D D3, 26/10/2026): página do tour 360 do apartamento ilustrativo, SEM prédio.
 // Mesmo contrato do módulo anônimo (LEIA.md): parâmetros ponto, hora, estacao, luzes, reflexo, horamin, cred; mensagens de entrada
-// { fonte:'site', id, irPara:{ponto}, hora, estacao, luzes, reflexo } com resposta { fonte:'modulo-3d', pronto:{ id, tour } } ou
+// { fonte:'site', id, irPara:{ponto}, hora, estacao, luzes, reflexo, reduzido } com resposta { fonte:'modulo-3d', pronto:{ id, tour } } ou
 // { fonte:'modulo-3d', erro:{ id, motivo } }; saída { fonte:'modulo-3d', estado }, { fonte:'modulo-3d', tour:{ ponto, minutos, luzes } } e,
 // com cred=site, { fonte:'modulo-3d', credito:[{ tipo:'vista-gerada', dados, visivel:true }] }.
 import { abrirTour360 } from "./tour360.js";
@@ -25,6 +25,15 @@ function luzesDe(v) {
   return Object.fromEntries(String(v).split(",").map((k) => k.trim()).filter(Boolean).map((k) => [k, true]));
 }
 
+// &embutido=1 (26/10, same as the anonymous module's app.js): inside the site's iframe a vertical gesture scrolls the PAGE and a
+// horizontal one turns the 360. tour360.js already lets the wheel through without Ctrl (zoom = Ctrl + wheel or pinch); this adds the
+// touch-action:pan-y on the tour surfaces so a vertical finger drag reaches the page.
+if (q.get("embutido") === "1") {
+  document.documentElement.classList.add("embutido");
+  const st0 = document.createElement("style"); st0.id = "embutido-css";
+  st0.textContent = "html.embutido #palco,html.embutido .t360,html.embutido .t360-cv,html.embutido canvas{touch-action:pan-y!important}";
+  document.head.appendChild(st0);
+}
 estadoHtml("carregando");
 if (q.get("cred") === "site") $("#cred").hidden = true;
 const BASE = "assets/render/tour360/";
@@ -83,7 +92,9 @@ window.addEventListener("message", async (ev) => {
   try {
     if (m.irPara && m.irPara.ponto != null) {
       if (!IDS.includes(m.irPara.ponto)) { manda({ erro: { id, motivo: "ponto-invalido" } }); return; }
-      await api.irPara(m.irPara.ponto);
+      // reduced motion (26/10, same as the anonymous module): the parent's flag `reduzido: true` or the iframe's own media query -> cut, no walk
+      const reduz = m.reduzido === true || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+      await api.irPara(m.irPara.ponto, reduz ? { dur: 1 } : undefined);
     }
     if (ESTACOES.includes(m.estacao)) await api.definirEstacao(m.estacao);
     const t = hm(m.hora); if (t != null) await api.definirHora(horaMin != null ? Math.max(t, horaMin) : t);

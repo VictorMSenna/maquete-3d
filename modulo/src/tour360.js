@@ -227,7 +227,7 @@ async function criar({
     m.position.copy(paraMundo(p.pos));
     m.visible = false;
     cena.add(m);
-    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final, torre } : null, finalRender: man.final ?? null, luzes: CENA.luzes, pufe: CENA.pufe, cama: CENA.cama || {} });
+    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final, torre } : null, finalRender: man.final ?? null, luzes: CENA.luzes, pufe: CENA.pufe, cama: CENA.cama || {}, corrimao: CENA.corrimao || {} });
     mix.pufeNoiteCena = CENA.pufe && CENA.pufe.noite;
     mix.aoRefinar = () => {
       if (fechado) return;
@@ -536,7 +536,7 @@ async function criar({
       const t0 = performance.now();
       await new Promise((ok) => {
         const passo = (t) => {
-          const k = Math.min(1, (t - t0) / dur), s = k * k * (3 - 2 * k);
+          const k = Math.min(1, Math.max(0, (t - t0) / dur)), s = k * k * (3 - 2 * k);
           camera.position.lerpVectors(p0, p1, s);
           if (ch) {
             yaw = y0 + dy * s;

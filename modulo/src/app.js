@@ -1397,7 +1397,7 @@ if (!deepLink() && params.has("semabertura")) fecharAbertura();
 function estadoModulo(e) {
   document.documentElement.dataset.estado = e;
   try {
-    if (window.parent !== window) window.parent.postMessage({ fonte: "modulo-3d", estado: e, sem3d: app.modo3d === "sem3d" }, "*");
+    if (window.parent !== window) window.parent.postMessage({ fonte: "modulo-3d", estado: e, sem3d: app.modo3d === "sem3d", ...e === "pronto" && app.__alvoVitrine ? app.__alvoVitrine() : {} }, "*");
   } catch (er) {
   }
 }
@@ -1431,7 +1431,8 @@ if (window.parent !== window) {
         const b = document.querySelector(".t360-reflexo");
         if (b && !b.hidden) b.click();
       }
-      if (d.irPara && d.irPara.ponto && d.irPara.ponto !== a.estado().ponto) await a.irPara(d.irPara.ponto);
+      const reduz = d.reduzido === true || matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (d.irPara && d.irPara.ponto && d.irPara.ponto !== a.estado().ponto) await a.irPara(d.irPara.ponto, reduz ? { dur: 1 } : {});
       const t0 = performance.now();
       while (performance.now() - t0 < 2e4) {
         const e = a.estado();
@@ -1464,10 +1465,10 @@ if (window.parent !== window) {
     }, 500);
   }
   if (params.get("modo") === "vitrine") {
-    let alvoSig = "";
-    const mandaAlvo = () => {
+    let alvoSig = "", finalMandado = false;
+    const calcAlvo = () => {
       const c = app.cena;
-      if (!c || !c.pontoDaUnidade || document.documentElement.dataset.estado !== "pronto") return;
+      if (!c || !c.pontoDaUnidade) return null;
       const W = innerWidth, H = innerHeight, cand = [];
       const pref = porNumero.get(params.get("pino") || "");
       for (const u of pref && pref.situacao === "disponivel" ? [pref, ...UNIDADES] : UNIDADES) {
@@ -1484,10 +1485,33 @@ if (window.parent !== window) {
       cand.sort((x, y) => x[0] - y[0]);
       const m = cand[0];
       const alvo = m ? { unidade: m[1].numero, x: Math.round(m[2].x), y: Math.round(m[2].y) } : null;
-      const sig = JSON.stringify(alvo);
+      // tower box = screen points of every unit window (both faces, all floors, occluded too) + 1.5 floors on top for the roof
+      // and 1/8 sideways (medirEnquadramento clamps its box to the free area: in portrait it collapsed to 0 height)
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const u of UNIDADES) {
+        const q = c.pontoDaUnidade(u.id);
+        if (!q) continue;
+        x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y);
+      }
+      const nAnd = new Set(UNIDADES.map((u) => u.andar)).size || 1, hA = (y1 - y0) / Math.max(1, nAnd - 1), wU = (x1 - x0) / 8;
+      const predio = x1 > x0 ? { x0: Math.round(x0 - 1.6 * wU), y0: Math.round(y0 - 3 * hA), x1: Math.round(x1 + 1.6 * wU), y1: Math.round(y1 + 2.6 * hA) } : null;
+      return { alvo, predio };
+    };
+    app.__alvoVitrine = calcAlvo;
+    const mandaAlvo = () => {
+      if (document.documentElement.dataset.estado !== "pronto") return;
+      const v = calcAlvo();
+      if (!v) return;
+      if (!finalMandado && document.documentElement.dataset.vitrine === "noite") {
+        finalMandado = true;
+        alvoSig = JSON.stringify(v);
+        posta({ ...v, final: true });
+        return;
+      }
+      const sig = JSON.stringify(v);
       if (sig === alvoSig) return;
       alvoSig = sig;
-      posta({ alvo });
+      posta(v);
     };
     setInterval(mandaAlvo, 250);
     addEventListener("resize", () => setTimeout(mandaAlvo, 50));

@@ -521,7 +521,7 @@ async function criar({
     return Array.isArray(c) && c.length >= 2 ? c.map(Number) : null;
   }
   let andando = null;
-  async function irPara2(id, { dur = 600 } = {}) {
+  async function irPara2(id, { dur = (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) ? 1 : 600 } = {}) {   // moradia 26/10: reduced motion = cut
     if (!PTS[id] || id === estado.ponto || andando) return andando;
     destino = id;
     andando = (async () => {
