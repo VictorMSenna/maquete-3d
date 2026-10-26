@@ -1,0 +1,1685 @@
+{
+ "pontos": [
+  {
+   "id": "entrada",
+   "nome": "Entrada",
+   "pos": [
+    5.65,
+    3.4,
+    1.55
+   ],
+   "largura": 4096,
+   "camadas": {
+    "ceu": {
+     "arq": "entrada/ceu.webp",
+     "escala": 0.63232421875,
+     "gama": 2.2,
+     "kb": 250.5,
+     "media": [
+      0.00545224,
+      0.00537471,
+      0.0058672
+     ]
+    },
+    "sol": {
+     "primavera": {
+      "08:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "09:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "10:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "10:30": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      }
+     },
+     "verao": {
+      "08:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "09:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "10:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "10:30": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      }
+     },
+     "outono": {
+      "08:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "09:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "10:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "10:30": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      }
+     },
+     "inverno": {
+      "08:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "09:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "10:00": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      },
+      "10:30": {
+       "arq": "entrada/sol.webp",
+       "escala": 0.2288818359375,
+       "gama": 2.2,
+       "kb": 233.1,
+       "media": [
+        0.00182711,
+        0.00134314,
+        0.0008581
+       ]
+      }
+     }
+    },
+    "hall": {
+     "arq": "entrada/hall.webp",
+     "grupos": [
+      "hall_abajur",
+      "hall_embutidos"
+     ],
+     "escala": 0.08752822875976562,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 401.36285400390625,
+     "gama": 3.0,
+     "kb": 2935.3,
+     "media": [
+      0.0339722,
+      0.01688358,
+      0.00721647
+     ]
+    },
+    "living": {
+     "arq": "entrada/living.webp",
+     "grupos": [
+      "living_abajur",
+      "living_embutidos",
+      "living_pendente",
+      "living_sancas"
+     ],
+     "escala": 0.046154141426086426,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 178.16448974609375,
+     "gama": 3.0,
+     "kb": 2918.6,
+     "media": [
+      0.01162239,
+      0.00572614,
+      0.00222207
+     ]
+    },
+    "cozinha": {
+     "arq": "entrada/cozinha.webp",
+     "grupos": [
+      "cozinha_embutidos",
+      "cozinha_led",
+      "cozinha_pendentes"
+     ],
+     "escala": 0.01555633544921875,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 12.0,
+     "gama": 3.0,
+     "kb": 2318.3,
+     "media": [
+      0.00118797,
+      0.00061836,
+      0.00026503
+     ]
+    },
+    "varanda": {
+     "arq": "entrada/varanda.webp",
+     "grupos": [
+      "varanda_bancada",
+      "varanda_embutidos"
+     ],
+     "escala": 0.0011501312255859375,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 5235.9970703125,
+     "gama": 3.0,
+     "kb": 1381.4,
+     "media": [
+      0.00021031,
+      0.00010248,
+      4.375e-05
+     ]
+    },
+    "cidade": {
+     "arq": "entrada/cidade.webp",
+     "fonte": "vista E0 21h (render_vista_hora.py)",
+     "escala": 0.0031921386253088713,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 121.74073028564453,
+     "gama": 3.0,
+     "kb": 3776.8,
+     "media": [
+      0.00028075,
+      0.00021507,
+      0.00026604
+     ]
+    },
+    "neutro": {
+     "media": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "_leia": "referencia neutra do balanco de branco da noite (sem arquivo)"
+    }
+   },
+   "luzes_ponto": [
+    "hall",
+    "living",
+    "cozinha",
+    "varanda",
+    "cidade"
+   ],
+   "render": "P1",
+   "vizinhos": [
+    "estar",
+    "varanda",
+    "cozinha",
+    "suite"
+   ]
+  },
+  {
+   "id": "estar",
+   "nome": "Living e jantar",
+   "pos": [
+    7.55,
+    8.45,
+    1.55
+   ],
+   "largura": 4096,
+   "camadas": {
+    "ceu": {
+     "arq": "estar/ceu.webp",
+     "escala": 0.72216796875,
+     "gama": 2.2,
+     "kb": 344.1,
+     "media": [
+      0.00821349,
+      0.00821188,
+      0.00919968
+     ]
+    },
+    "sol": {
+     "primavera": {
+      "08:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "09:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "10:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "10:30": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      }
+     },
+     "verao": {
+      "08:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "09:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "10:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "10:30": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      }
+     },
+     "outono": {
+      "08:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "09:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "10:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "10:30": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      }
+     },
+     "inverno": {
+      "08:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "09:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "10:00": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      },
+      "10:30": {
+       "arq": "estar/sol.webp",
+       "escala": 0.86328125,
+       "gama": 2.2,
+       "kb": 292.5,
+       "media": [
+        0.00845277,
+        0.00654198,
+        0.00454243
+       ]
+      }
+     }
+    },
+    "hall": {
+     "arq": "estar/hall.webp",
+     "grupos": [
+      "hall_abajur",
+      "hall_embutidos"
+     ],
+     "escala": 0.008348464965820312,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 122.69711303710938,
+     "gama": 3.0,
+     "kb": 2810.2,
+     "media": [
+      0.00099658,
+      0.00049263,
+      0.00019787
+     ]
+    },
+    "living": {
+     "arq": "estar/living.webp",
+     "grupos": [
+      "living_abajur",
+      "living_embutidos",
+      "living_pendente",
+      "living_sancas"
+     ],
+     "escala": 0.3926354646682739,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 54.824581146240234,
+     "gama": 3.0,
+     "kb": 2800.2,
+     "media": [
+      0.03339206,
+      0.01675811,
+      0.00668766
+     ]
+    },
+    "cozinha": {
+     "arq": "estar/cozinha.webp",
+     "grupos": [
+      "cozinha_embutidos",
+      "cozinha_led",
+      "cozinha_pendentes"
+     ],
+     "escala": 0.016953468322753906,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 301.6365661621094,
+     "gama": 3.0,
+     "kb": 3102.3,
+     "media": [
+      0.00251157,
+      0.00132163,
+      0.00057568
+     ]
+    },
+    "varanda": {
+     "arq": "estar/varanda.webp",
+     "grupos": [
+      "varanda_bancada",
+      "varanda_embutidos"
+     ],
+     "escala": 0.009075164794921875,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 635.633544921875,
+     "gama": 3.0,
+     "kb": 2571.8,
+     "media": [
+      0.00109514,
+      0.00052817,
+      0.00021555
+     ]
+    },
+    "cidade": {
+     "arq": "estar/cidade.webp",
+     "fonte": "vista E0 21h (render_vista_hora.py)",
+     "escala": 0.00952758826315403,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 42.403175354003906,
+     "gama": 3.0,
+     "kb": 4335.7,
+     "media": [
+      0.00036764,
+      0.00028974,
+      0.00036155
+     ]
+    },
+    "neutro": {
+     "media": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "_leia": "referencia neutra do balanco de branco da noite (sem arquivo)"
+    }
+   },
+   "luzes_ponto": [
+    "hall",
+    "living",
+    "cozinha",
+    "varanda",
+    "cidade"
+   ],
+   "render": "P2",
+   "vizinhos": [
+    "entrada",
+    "varanda",
+    "cozinha",
+    "suite"
+   ]
+  },
+  {
+   "id": "varanda",
+   "nome": "Varanda gourmet",
+   "pos": [
+    5.3,
+    11.7,
+    1.55
+   ],
+   "largura": 4096,
+   "camadas": {
+    "ceu": {
+     "arq": "varanda/ceu.webp",
+     "escala": 2.208984375,
+     "gama": 2.2,
+     "kb": 821.3,
+     "media": [
+      0.05840975,
+      0.0674504,
+      0.0939052
+     ]
+    },
+    "sol": {
+     "primavera": {
+      "08:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "09:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "10:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "10:30": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      }
+     },
+     "verao": {
+      "08:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "09:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "10:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "10:30": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      }
+     },
+     "outono": {
+      "08:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "09:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "10:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "10:30": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      }
+     },
+     "inverno": {
+      "08:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "09:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "10:00": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      },
+      "10:30": {
+       "arq": "varanda/sol.webp",
+       "escala": 1.54296875,
+       "gama": 2.2,
+       "kb": 758.5,
+       "media": [
+        0.09970151,
+        0.08644083,
+        0.07063659
+       ]
+      }
+     }
+    },
+    "living": {
+     "arq": "varanda/living.webp",
+     "grupos": [
+      "living_abajur",
+      "living_embutidos",
+      "living_pendente",
+      "living_sancas"
+     ],
+     "escala": 0.06242704391479492,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 17.767549514770508,
+     "gama": 3.0,
+     "kb": 3149.5,
+     "media": [
+      0.0103062,
+      0.00516925,
+      0.00215183
+     ]
+    },
+    "cozinha": {
+     "arq": "varanda/cozinha.webp",
+     "grupos": [
+      "cozinha_embutidos",
+      "cozinha_led",
+      "cozinha_pendentes"
+     ],
+     "escala": 0.012169837951660156,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 384.8646240234375,
+     "gama": 3.0,
+     "kb": 2076.1,
+     "media": [
+      0.00123344,
+      0.00063531,
+      0.00027789
+     ]
+    },
+    "varanda": {
+     "arq": "varanda/varanda.webp",
+     "grupos": [
+      "varanda_bancada",
+      "varanda_embutidos"
+     ],
+     "escala": 0.024393677711486816,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 799.618896484375,
+     "gama": 3.0,
+     "kb": 3034.3,
+     "media": [
+      0.00755074,
+      0.00397842,
+      0.00170632
+     ]
+    },
+    "cidade": {
+     "arq": "varanda/cidade.webp",
+     "fonte": "vista E0 21h (render_vista_hora.py)",
+     "escala": 0.04645996168255806,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 12.0,
+     "gama": 3.0,
+     "kb": 7516.1,
+     "media": [
+      0.00224761,
+      0.00214532,
+      0.00342754
+     ]
+    },
+    "neutro": {
+     "media": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "_leia": "referencia neutra do balanco de branco da noite (sem arquivo)"
+    }
+   },
+   "luzes_ponto": [
+    "living",
+    "cozinha",
+    "varanda",
+    "cidade"
+   ],
+   "render": "P3",
+   "vizinhos": [
+    "entrada",
+    "estar",
+    "cozinha",
+    "suite"
+   ]
+  },
+  {
+   "id": "cozinha",
+   "nome": "Cozinha",
+   "pos": [
+    2.1,
+    2.75,
+    1.55
+   ],
+   "largura": 4096,
+   "camadas": {
+    "ceu": {
+     "arq": "cozinha/ceu.webp",
+     "escala": 0.94580078125,
+     "gama": 2.2,
+     "kb": 279.6,
+     "media": [
+      0.0121997,
+      0.01263889,
+      0.01503704
+     ]
+    },
+    "sol": {
+     "primavera": {
+      "08:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "09:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "10:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "10:30": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      }
+     },
+     "verao": {
+      "08:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "09:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "10:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "10:30": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      }
+     },
+     "outono": {
+      "08:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "09:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "10:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "10:30": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      }
+     },
+     "inverno": {
+      "08:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "09:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "10:00": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      },
+      "10:30": {
+       "arq": "cozinha/sol.webp",
+       "escala": 0.595703125,
+       "gama": 2.2,
+       "kb": 219.6,
+       "media": [
+        0.0050831,
+        0.00400968,
+        0.00275959
+       ]
+      }
+     }
+    },
+    "living": {
+     "arq": "cozinha/living.webp",
+     "grupos": [
+      "living_abajur",
+      "living_embutidos",
+      "living_pendente",
+      "living_sancas"
+     ],
+     "escala": 0.02538776397705078,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 63.760826110839844,
+     "gama": 3.0,
+     "kb": 2410.6,
+     "media": [
+      0.00380147,
+      0.00203854,
+      0.00090247
+     ]
+    },
+    "cozinha": {
+     "arq": "cozinha/cozinha.webp",
+     "grupos": [
+      "cozinha_embutidos",
+      "cozinha_led",
+      "cozinha_pendentes"
+     ],
+     "escala": 0.603302001953125,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 61.06116485595703,
+     "gama": 3.0,
+     "kb": 2544.0,
+     "media": [
+      0.12866688,
+      0.06613937,
+      0.02707765
+     ]
+    },
+    "varanda": {
+     "arq": "cozinha/varanda.webp",
+     "grupos": [
+      "varanda_bancada",
+      "varanda_embutidos"
+     ],
+     "escala": 0.0009312629699707031,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 5490.6796875,
+     "gama": 3.0,
+     "kb": 1324.5,
+     "media": [
+      9.569e-05,
+      4.932e-05,
+      2.175e-05
+     ]
+    },
+    "cidade": {
+     "arq": "cozinha/cidade.webp",
+     "escala": 0.012237548828125,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 82.0895767211914,
+     "gama": 3.0,
+     "kb": 528.3,
+     "media": [
+      0.00037622,
+      0.00028779,
+      0.00020732
+     ]
+    },
+    "neutro": {
+     "media": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "_leia": "referencia neutra do balanco de branco da noite (sem arquivo)"
+    }
+   },
+   "luzes_ponto": [
+    "living",
+    "cozinha",
+    "varanda",
+    "cidade"
+   ],
+   "render": "P4",
+   "vizinhos": [
+    "entrada",
+    "estar",
+    "varanda",
+    "suite"
+   ]
+  },
+  {
+   "id": "suite",
+   "nome": "Suíte master",
+   "pos": [
+    13.0,
+    8.3,
+    1.55
+   ],
+   "largura": 4096,
+   "camadas": {
+    "ceu": {
+     "arq": "suite/ceu.webp",
+     "escala": 1.9716796875,
+     "gama": 2.2,
+     "kb": 630.1,
+     "media": [
+      0.03828109,
+      0.03893374,
+      0.04641645
+     ]
+    },
+    "sol": {
+     "primavera": {
+      "08:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "09:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "10:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "10:30": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      }
+     },
+     "verao": {
+      "08:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "09:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "10:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "10:30": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      }
+     },
+     "outono": {
+      "08:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "09:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "10:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "10:30": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      }
+     },
+     "inverno": {
+      "08:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "09:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "10:00": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      },
+      "10:30": {
+       "arq": "suite/sol.webp",
+       "escala": 1.767578125,
+       "gama": 2.2,
+       "kb": 585.3,
+       "media": [
+        0.0718369,
+        0.05414937,
+        0.03903565
+       ]
+      }
+     }
+    },
+    "suite": {
+     "arq": "suite/suite.webp",
+     "grupos": [
+      "master_abajures",
+      "master_embutidos",
+      "master_sancas"
+     ],
+     "escala": 0.6002273559570312,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 49.095237731933594,
+     "gama": 3.0,
+     "kb": 2849.5,
+     "media": [
+      0.06658816,
+      0.02945065,
+      0.01079169
+     ]
+    },
+    "cidade": {
+     "arq": "suite/cidade.webp",
+     "escala": 0.0206756591796875,
+     "joelho": 0.72,
+     "joelho2": 0.95,
+     "y2": 8.0,
+     "ymax": 49.040531158447266,
+     "gama": 3.0,
+     "kb": 957.7,
+     "media": [
+      0.0005377,
+      0.00041276,
+      0.00029655
+     ]
+    },
+    "neutro": {
+     "media": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "_leia": "referencia neutra do balanco de branco da noite (sem arquivo)"
+    }
+   },
+   "luzes_ponto": [
+    "suite",
+    "cidade"
+   ],
+   "render": "P5",
+   "vizinhos": [
+    "entrada",
+    "estar",
+    "varanda",
+    "cozinha"
+   ]
+  }
+ ],
+ "moradia": true,
+ "rotulo": "Imagem ilustrativa: projeto criado sem nenhuma foto ou vídeo",
+ "vista": "Vista da janela: imagem ilustrativa (foto de drone; nada do Google, nada de IA)",
+ "eixos": "pos = [u, v, altura] m na planta da demo; centro do panorama = +v (varanda)",
+ "sol_nota": "sol direto modelado para a manha (face do jantar): camada sol cheia 08:00-10:00, rampa ate zero 07:00 e 11:30, zero no resto do dia",
+ "resolucoes": {
+  "ceu": [
+   4096,
+   2048
+  ]
+ },
+ "cena": {
+  "_leia": "demo de moradia (Fabrica-3D D3, 26/10/2026): luzes por ambiente (soma dos grupos de luz do render) + luzes da cidade",
+  "luzes": [
+   "living",
+   "varanda",
+   "cozinha",
+   "hall",
+   "suite",
+   "cidade"
+  ],
+  "nomesLuz": {
+   "living": "Living e jantar",
+   "varanda": "Varanda",
+   "cozinha": "Cozinha",
+   "hall": "Hall",
+   "suite": "Suíte",
+   "cidade": "Luzes da cidade"
+  },
+  "curtoLuz": {
+   "living": "Living",
+   "varanda": "Varanda",
+   "cozinha": "Cozinha",
+   "hall": "Hall",
+   "suite": "Suíte",
+   "cidade": "Cidade"
+  },
+  "luzesNoite": [
+   "living",
+   "varanda",
+   "cozinha",
+   "hall",
+   "suite",
+   "cidade"
+  ],
+  "inicio": "entrada",
+  "refLuz": {
+   "ponto": "entrada",
+   "camada": "neutro"
+  },
+  "pufe": {
+   "ganho": 0,
+   "amb": 0,
+   "albedo": [
+    0,
+    0,
+    0
+   ],
+   "noite": 0
+  },
+  "chegada": {
+   "_leia": "D3 26/10: [yaw, pitch]; yaw 0 = varanda (+v), + = direita",
+   "entrada": [
+    0,
+    -6
+   ],
+   "estar": [
+    135,
+    -6
+   ],
+   "varanda": [
+    0,
+    -4
+   ],
+   "cozinha": [
+    -30,
+    -6
+   ],
+   "suite": [
+    0,
+    -6
+   ]
+  }
+ },
+ "apartamento": {
+  "area_m2": 183.0,
+  "ambientes": [
+   [
+    "Área de serviço",
+    "3,3 m²"
+   ],
+   [
+    "Despensa",
+    "2,6 m²"
+   ],
+   [
+    "Cozinha integrada",
+    "11,1 m²"
+   ],
+   [
+    "Hall social",
+    "16,0 m²"
+   ],
+   [
+    "Lavabo",
+    "2,3 m²"
+   ],
+   [
+    "Living e jantar",
+    "42,6 m²"
+   ],
+   [
+    "Varanda gourmet",
+    "23,0 m²"
+   ],
+   [
+    "Circulação íntima",
+    "6,9 m²"
+   ],
+   [
+    "Rouparia",
+    "1,4 m²"
+   ],
+   [
+    "Suíte 2",
+    "13,0 m²"
+   ],
+   [
+    "Banho da suíte 2",
+    "3,2 m²"
+   ],
+   [
+    "Banho da suíte 3",
+    "2,9 m²"
+   ],
+   [
+    "Suíte 3",
+    "10,5 m²"
+   ],
+   [
+    "Banho master",
+    "6,3 m²"
+   ],
+   [
+    "Closet master",
+    "7,7 m²"
+   ],
+   [
+    "Suíte master",
+    "15,0 m²"
+   ]
+  ],
+  "nota": "projeto ilustrativo, criado sem nenhuma foto ou vídeo",
+  "_leia": "área privativa da planta d3 (conta, não medida); áreas dos ambientes = caixa interna de cada cômodo"
+ }
+}
