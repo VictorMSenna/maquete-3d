@@ -1,7 +1,0 @@
-{
- "placeholder": true,
- "nome": "{{BRAND}}",
- "logo": "",
- "cnpj": "{{CNPJ}}",
- "endereco": "{{ENDEREÇO}}"
-}
