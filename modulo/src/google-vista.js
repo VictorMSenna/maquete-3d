@@ -150,7 +150,8 @@ const LUZ_GLSL = `
         jan *= smoothstep(0.30, 0.45, abs(dot(nB, normalize(camJ - vB5))));
         jan *= 1.0 - smoothstep(0.08, 0.16, abs(nB.y));
         jan *= 1.0 - smoothstep(0.05, 0.15, length(fwidth(nB)));
-        if (uPertoJ > 0.5) jan *= smoothstep(45.0, 90.0, length(camJ - vB5));
+        float dCamJ = length(camJ - vB5);
+        jan *= uPertoJ > 0.5 ? smoothstep(45.0, 90.0, dCamJ) : smoothstep(${typeof location !== "undefined" && /[?&]janperto=\d+,\d+/.test(location.search) ? location.search.match(/[?&]janperto=(\d+),(\d+)/).slice(1, 3).map((x) => x + ".0").join(", ") : "150.0, 190.0"}, dCamJ);${typeof location !== "undefined" && /[?&]jandist=1/.test(location.search) ? " { float dJ = length(camJ - vB5); outgoingLight = cB * 0.35 + jan * (dJ < 40.0 ? vec3(1.0, 0.0, 0.0) : dJ < 60.0 ? vec3(1.0, 0.5, 0.0) : dJ < 80.0 ? vec3(1.0, 1.0, 0.0) : dJ < 110.0 ? vec3(0.0, 1.0, 0.0) : dJ < 150.0 ? vec3(0.0, 1.0, 1.0) : vec3(0.3, 0.3, 1.0)); cB = vec3(0.0); jan = 0.0; }" : ""}
         float acesa = step(id, uFracG) * jan;
         float lum = dot(cB, vec3(0.2126, 0.7152, 0.0722));
         float vidro = 1.0 - smoothstep(0.18, 0.5, lum);
