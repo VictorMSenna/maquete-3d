@@ -493,9 +493,19 @@ function criarCena({
   controls.touches.one = CameraControls.ACTION.TOUCH_ROTATE;
   controls.touches.two = CameraControls.ACTION.TOUCH_DOLLY;
   controls.touches.three = CameraControls.ACTION.NONE;
+  let a5Alvo = null, a5T = 0;
   if (/[?&]embutido=1/.test(location.search)) container.addEventListener("wheel", (e) => {
-    if (!e.ctrlKey) e.stopPropagation();
-  }, { capture: true });
+    e.stopPropagation();
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    if (!controls.enabled) return;
+    const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY;
+    const agora = performance.now();
+    if (a5Alvo == null || agora - a5T > 400) a5Alvo = controls.distance;
+    a5T = agora;
+    a5Alvo = THREE.MathUtils.clamp(a5Alvo * Math.pow(0.95, -dy / 30 * controls.dollySpeed), controls.minDistance, controls.maxDistance);
+    controls.dollyTo(a5Alvo, true);
+  }, { capture: true, passive: false });
   const caixaPredio = new THREE.Box3(new THREE.Vector3(BX0, 0, BZ0), new THREE.Vector3(BX1, TOPO, BZ1));
   const ALVO = caixaPredio.getCenter(new THREE.Vector3());
   const RAIO_PREDIO = caixaPredio.getBoundingSphere(new THREE.Sphere()).radius;
@@ -1850,6 +1860,28 @@ function criarCena({
       canvas: [r.width, r.height]
     };
   }
+  let caixaA1 = null;
+  const vCaixa = new THREE.Vector3();
+  function caixaNaTela() {
+    if (!caixaA1) caixaA1 = new THREE.Box3().setFromObject(PB.grupo);
+    camera.updateMatrixWorld();
+    const r = canvas.getBoundingClientRect(), a = caixaA1.min, b = caixaA1.max;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const x of [a.x, b.x]) for (const y of [a.y, b.y]) for (const z of [a.z, b.z]) {
+      vCaixa.set(x, y, z).project(camera);
+      if (vCaixa.z > 1 || vCaixa.z < -1) return null;
+      const sx = (vCaixa.x * 0.5 + 0.5) * largura, sy = (-vCaixa.y * 0.5 + 0.5) * altura;
+      x0 = Math.min(x0, sx);
+      x1 = Math.max(x1, sx);
+      y0 = Math.min(y0, sy);
+      y1 = Math.max(y1, sy);
+    }
+    return { x0: r.left + x0, y0: r.top + y0, x1: r.left + x1, y1: r.top + y1 };
+  }
+  function estadoCarga() {
+    const g = /[?&]google3d=0/.test(location.search) ? "desligado" : gCena ? gCena.mostrando ? "mostrando" : "carregando" : googleEsperado ? "iniciando" : "sem";
+    return { quadro: !!stats.pronto, fachada: b7Ativo("fachada") ? !!b7.fachada : null, entorno: DRONE ? !!entB7.carregado : null, google: g };
+  }
   function solDebug() {
     const topo = projetar(CX, TOPO, CZ);
     const ds = disco.visible ? projetar(disco.position.x, disco.position.y, disco.position.z) : null;
@@ -1903,6 +1935,8 @@ function criarCena({
     voltarDaJanela,
     medirEnquadramento,
     luminanciaMedia,
+    caixaNaTela,
+    estadoCarga,
     preCarregarJanela: (u) => {
       preJanela = u;
       if (gCena) gCena.preCarregar(u);

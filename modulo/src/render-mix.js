@@ -11,8 +11,17 @@ function dniLux(el) {
 function dhiLux(el) {
   if (el <= -6) return 3;
   if (el <= 0) return 3 + (el + 6) / 6 * 400;
-  return 400 + 16e3 * Math.sin(el * Math.PI / 180) ** 0.6;
+  const k = el >= 6 ? 1 : el / 6 * (el / 6) * (3 - el / 3);
+  return 400 + 16e3 * Math.sin(el * Math.PI / 180) ** 0.6 * k;
 }
+function pesoLuzNoite(el) {
+  const e = Number.isFinite(el) ? el : -12, t = Math.min(1, Math.max(0, (e + 8) / 10));
+  return 1 - t * t * (3 - 2 * t);
+}
+const FADE = 250, LRU_MAX = 24;
+const QS = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams("");
+const SOL_ESPERA = QS.get("solespera") === "1";
+const MEIA = QS.get("solmeia") !== "0";
 const mix3 = (a, b, k) => a.map((x, i) => x + (b[i] - x) * k);
 function corCeu(el) {
   return el > 10 ? [1, 1, 1] : el > -2 ? mix3([1.05, 0.9, 0.85], [1, 1, 1], (el + 2) / 12) : [0.35, 0.45, 0.9];
@@ -65,6 +74,9 @@ uniform float modoLum;
 uniform sampler2D tLoc;
 uniform float sLoc;
 uniform float lG;
+uniform float usaChave;
+uniform float chaveT;
+uniform float kDiaC;
 uniform sampler2D tFora;
 uniform float usaFora;
 uniform float pufeGanho;
@@ -148,6 +160,8 @@ vec3 neutral(vec3 c){
 }
 void main(){
   vec3 s = vec3(0.0);
+  float ex = expo, lGk = lG;
+  if (usaChave > 0.5) { vec4 kc = texture2D(tLoc, vec2(0.5 / 64.0, 32.5 / 33.0)); if (kc.g > 0.5) { lGk = (kc.r + kc.b / 255.0) * 20.0 - 16.0; ex = expo * exp2(clamp(chaveT - lGk, -1.0, 2.0) * kDiaC); } }
   float foR = semRefl > 0.5 && usaFora > 0.5 ? texture2D(tFora, vUv).r : 0.0; // ITEM 12
   ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) { vec3 c${i} = texture2D(t[${i}], vUv).rgb; if (joelho[${i}] <= 0.0 && dbT > 0.0) c${i} = deband(t[${i}], vUv, c${i});
 #ifdef COM_LO
@@ -159,7 +173,7 @@ void main(){
     vec3 n = normalize(texture2D(tNor, vUv).rgb * 2.0 - 1.0);
     s += gDir * alb * max(dot(n, solDir), 0.0) * visSol(vUv);
   }
-  vec3 x = s * wb * expo;
+  vec3 x = s * wb * ex;
   vec2 foP = usaFora > 0.5 ? texture2D(tFora, vUv).rg : vec2(0.0);
   float fo = foP.x;
   if (foP.y > 0.0 && modoLum < 0.5 && pufeCor.r > 0.0) {
@@ -178,14 +192,14 @@ void main(){
     float lp = dot(x, vec3(0.2126, 0.7152, 0.0722));
     vec3 sh = mix(vec3(lp), x, 0.5) * pufeGanho; // its own shading, as if the albedo were ~pufeGanho x lighter (less violet)
     sh /= 1.0 + dot(sh, vec3(0.2126, 0.7152, 0.0722)) / 0.12; // soft cap: the lit lower front seen from the balcony went white
-    vec3 xp = sh + pufeAlb * corLuz * ambSala * expo * pufeAmb * pufeNoite;
+    vec3 xp = sh + pufeAlb * corLuz * ambSala * ex * pufeAmb * pufeNoite;
     x = mix(x, xp, foP.y);
   }
   else if (camaFator < 0.999 && usaFora > 0.5 && modoLum < 0.5) { float cb = texture2D(tFora, vUv).b; x *= mix(1.0, camaFator, cb * (1.0 - clamp((pufeNoite - 1.0) / 0.6, 0.0, 1.0))); } // by day only: at night the spots already model the pillows
   else if (corrimao > 0.5 && usaFora > 0.5 && modoLum < 0.5) { float cr = texture2D(tFora, vUv).b; if (cr > 0.0) x = mix(x, dot(x, vec3(0.2126, 0.7152, 0.0722)) * 0.85 * corLuz, cr); }
   if (modoLum > 0.5) { float l0 = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6); float v = clamp((log2(l0) + 16.0) / 20.0, 0.0, 1.0) * 255.0; gl_FragColor = vec4(floor(v) / 255.0, 1.0 - fo, fract(v), 1.0); return; } // 08/10: 16 bits (R hi + B lo) - 8 bits made rings on smooth walls
   if (usaFora > 0.5) x *= mix(1.0, fatorFora, fo); // v4: window exposed on its own
-  if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUv); float r = exp2(clamp((lG - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
+  if (sLoc > 0.0) { vec4 q = texture2D(tLoc, usaChave > 0.5 ? vec2(vUv.x, min(vUv.y * 32.0, 31.5) / 33.0) : vUv); float r = exp2(clamp((lGk - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
   float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
   x *= (1.0 + 1.0 / ombro) / (1.0 + l / ombro);   // soft highlight roll-off; 08/10 Victor: white bed blown in daylight -> stronger shoulder (1.1)
   vec3 o = neutral(x);
@@ -194,10 +208,43 @@ void main(){
   gl_FragColor = vec4(o, 1.0);
 }`;
 const INFO = { tamanhos: /* @__PURE__ */ new Set(), decodificador: null };
-async function carregaTextura(url, max, dados = false, manterImagem = false, inteira = false) {
+const MASCARA = QS.get("mascara") !== "0";
+function mascaraRegular(fonte) {
+  try {
+    const W = fonte.width, H = fonte.height, c = document.createElement("canvas");
+    c.width = W;
+    c.height = H;
+    const g = c.getContext("2d", { willReadFrequently: true });
+    g.drawImage(fonte, 0, 0);
+    const im = g.getImageData(0, 0, W, H), d = im.data, b = new Uint8Array(W * H), h = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) b[i] = d[i * 4] > 32 ? 1 : 0;
+    for (let y = 0; y < H; y++) {
+      const o = y * W;
+      for (let x = 0; x < W; x++) h[o + x] = b[o + (x ? x - 1 : W - 1)] + b[o + x] + b[o + (x < W - 1 ? x + 1 : 0)];
+    }
+    for (let y = 0; y < H; y++) {
+      const o = y * W, a = (y ? y - 1 : 0) * W, z = (y < H - 1 ? y + 1 : y) * W;
+      for (let x = 0; x < W; x++) d[(o + x) * 4] = Math.round((h[a + x] + h[o + x] + h[z + x]) * 255 / 9);
+    }
+    g.putImageData(im, 0, 0);
+    if (fonte.close) fonte.close();
+    return c;
+  } catch (e) {
+    return fonte;
+  }
+}
+async function carregaTextura(url, max, dados = false, manterImagem = false, inteira = false, reduzida = false) {
   if (inteira) max = 0;
   const blob = await (await fetch(url)).blob();
   let img = null, flipY = false;
+  if (reduzida && max && !dados) {
+    try {
+      img = await createImageBitmap(blob, { imageOrientation: "flipY", colorSpaceConversion: "none", premultiplyAlpha: "none", resizeWidth: max, resizeHeight: max / 2, resizeQuality: "high" });
+      INFO.decodificador = "createImageBitmap";
+    } catch (e) {
+      img = null;
+    }
+  }
   if (dados && max && max < 4096) {
     try {
       const ini = await createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
@@ -240,6 +287,7 @@ async function carregaTextura(url, max, dados = false, manterImagem = false, int
     if (img.close) img.close();
     fonte = c;
   }
+  if (manterImagem && MASCARA) fonte = mascaraRegular(fonte);
   INFO.tamanhos.add(`${fonte.width}x${fonte.height}`);
   const tx = new THREE.Texture(fonte);
   tx.flipY = flipY;
@@ -266,9 +314,14 @@ async function carregaTextura(url, max, dados = false, manterImagem = false, int
   };
   return tx;
 }
+const MEDIAS = /* @__PURE__ */ new WeakMap();
 function mediaVis(tab, minutos) {
   if (!tab) return null;
-  const ks = Object.keys(tab).map((k) => [+k.slice(0, 2) * 60 + +k.slice(3, 5), tab[k]]).sort((x, y) => x[0] - y[0]);
+  let ks = MEDIAS.get(tab);
+  if (!ks) {
+    ks = Object.keys(tab).map((k) => [+k.slice(0, 2) * 60 + +k.slice(3, 5), tab[k]]).sort((x, y) => x[0] - y[0]);
+    MEDIAS.set(tab, ks);
+  }
   if (!ks.length) return null;
   if (minutos <= ks[0][0]) return ks[0][1];
   for (let i = 1; i < ks.length; i++) if (minutos <= ks[i][0]) {
@@ -301,6 +354,56 @@ uniform float nInt;
 uniform float meioMin;
 ` + FRAG.slice(FRAG.indexOf("float acesaT("), FRAG.indexOf("#ifdef USA_AC", FRAG.indexOf("float acesaT("))) + "void main(){ gl_FragColor = vec4(acesa(vUv), 0.0, 0.0, 1.0); }";
 const AC = /* @__PURE__ */ new WeakMap();
+const BORDA = QS.get("borda") !== "0";
+const FRAG_BORDA = `precision highp float;
+varying vec2 vUv;
+uniform sampler2D tP;
+uniform sampler2D tF;
+uniform vec2 px;
+float R(vec2 o){ return texture2D(tF, vUv + o * px).r; }
+void main(){
+  vec4 c = texture2D(tP, vUv);
+  if (R(vec2(0.0)) < 0.996) {
+    float a = R(vec2(1.0, 0.0)), b = R(vec2(-1.0, 0.0)), e = R(vec2(0.0, 1.0)), d = R(vec2(0.0, -1.0));
+    float a2 = R(vec2(2.0, 0.0)), b2 = R(vec2(-2.0, 0.0)), e2 = R(vec2(0.0, 2.0)), d2 = R(vec2(0.0, -2.0));
+    if (max(max(max(a, b), max(e, d)), max(max(a2, b2), max(e2, d2))) > 0.5) {
+      vec2 g = vec2(a + 2.0 * a2 - b - 2.0 * b2, e + 2.0 * e2 - d - 2.0 * d2);
+      if (dot(g, g) > 1e-4) {
+        vec2 q = vUv - normalize(g) * 4.0 * px;
+        vec4 f = texture2D(tP, q);
+        vec3 L = vec3(0.2126, 0.7152, 0.0722);
+        if (texture2D(tF, q).r < 0.02 && dot(f.rgb, L) < dot(c.rgb, L)) c = f;
+      }
+    }
+  }
+  gl_FragColor = c;
+}`;
+const BRUTO = /* @__PURE__ */ new WeakMap();
+function passoBorda(r, alvo, tF) {
+  let b = BRUTO.get(r);
+  if (!b) {
+    const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG_BORDA, depthTest: false, depthWrite: false, uniforms: { tP: { value: PRETO }, tF: { value: PRETO }, px: { value: new THREE.Vector2(1, 1) } } });
+    const cena = new THREE.Scene();
+    cena.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+    b = { mat, cena, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), rts: /* @__PURE__ */ new Map() };
+    BRUTO.set(r, b);
+  }
+  const k = `${alvo.width}x${alvo.height}x${alvo.texture.type}x${alvo.texture.colorSpace}`;
+  let rt = b.rts.get(k);
+  if (!rt) {
+    rt = new THREE.WebGLRenderTarget(alvo.width, alvo.height, { type: alvo.texture.type, depthBuffer: false, generateMipmaps: false });
+    rt.texture.colorSpace = alvo.texture.colorSpace;
+    b.rts.set(k, rt);
+  }
+  return { rt, aplica: () => {
+    const U = b.mat.uniforms;
+    U.tP.value = rt.texture;
+    U.tF.value = tF;
+    U.px.value.set(1 / (tF.userData.w || 4096), 1 / (tF.userData.h || 2048));
+    r.setRenderTarget(alvo);
+    r.render(b.cena, b.cam);
+  } };
+}
 function prepassoAcesa(r, U) {
   let a = AC.get(r);
   if (!a) {
@@ -345,6 +448,8 @@ class MisturaPonto {
     this.unidade = unidade;
     this.finalRender = finalRender;
     this.cache = /* @__PURE__ */ new Map();
+    const qi = +QS.get("solindmax");
+    this.maxInd = Math.min(larguraMax, qi > 0 ? qi : 2048);
     const w = Math.min(larguraMax, ponto.largura || 4096);
     const gl = renderer.getContext();
     const half = renderer.capabilities.isWebGL2 && (gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
@@ -393,6 +498,9 @@ class MisturaPonto {
         tLoc: { value: PRETO },
         sLoc: { value: 0 },
         lG: { value: 0 },
+        usaChave: { value: 0 },
+        chaveT: { value: -4.3 },
+        kDiaC: { value: 0 },
         dbR: { value: 14 / w },
         loIdx: { value: Array(7).fill(-1) },
         semRefl: { value: 0 },
@@ -452,20 +560,105 @@ void main(){
 }` });
     this.cenaBorra = new THREE.Scene();
     this.cenaBorra.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.matBorra));
+    this.chaveGPU = renderer.capabilities.isWebGL2 && !!renderer.readRenderTargetPixelsAsync && QS.get("chavegpu") !== "0";
+    if (this.chaveGPU) {
+      this.rtLoc2 = mapa(64, 33);
+      this.matChave = new THREE.ShaderMaterial({ vertexShader: VERT, depthTest: false, depthWrite: false, uniforms: { tL: { value: this.rtLoc.texture } }, fragmentShader: `
+precision highp float; varying vec2 vUv; uniform sampler2D tL;
+void main(){
+  float row = floor(vUv.y * 33.0);
+  if (row < 31.5) { gl_FragColor = texture2D(tL, vec2(vUv.x, (row + 0.5) / 32.0)); return; }
+  float sl = 0.0, sw = 0.0;
+  for (int j = 0; j < 32; j++) { float ca = cos(((float(j) + 0.5) / 32.0 - 0.5) * 3.14159265358979);
+    for (int i = 0; i < 64; i++) { vec4 c = texture2D(tL, (vec2(float(i), float(j)) + 0.5) / vec2(64.0, 32.0)); float w = c.g * ca; sl += ((c.r + c.b / 255.0) * 20.0 - 16.0) * w; sw += w; } }
+  float v = clamp(((sw > 0.0 ? sl / sw : 0.0) + 16.0) / 20.0, 0.0, 1.0) * 255.0;
+  gl_FragColor = vec4(floor(v) / 255.0, sw > 0.0 ? 1.0 : 0.0, fract(v), 1.0);
+}` });
+      this.cenaChave = new THREE.Scene();
+      this.cenaChave.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.matChave));
+    }
   }
-  textura(rel, dados = false, inteira = false) {
+  textura(rel, dados = false, inteira = false, max = this.max) {
     if (!rel) return Promise.resolve(null);
-    if (!this.cache.has(rel)) this.cache.set(rel, carregaTextura(this.base + rel, this.max, dados, /(^|\/)fora[^/]*$/.test(rel), inteira));
+    if (!this.cache.has(rel)) {
+      const v2 = carregaTextura(this.base + rel, max, dados, /(^|\/)fora[^/]*$/.test(rel), inteira, max < this.max);
+      v2.then(
+        (t) => {
+          v2.tx = t;
+          v2.em = performance.now();
+          if (t && !this.liberado) {
+            try {
+              this.r.initTexture(t);
+            } catch (e) {
+            }
+          }
+        },
+        () => {
+          if (this.cache.get(rel) === v2) this.cache.delete(rel);
+        }
+      );
+      this.cache.set(rel, v2);
+    }
     const v = this.cache.get(rel);
     this.cache.delete(rel);
     this.cache.set(rel, v);
-    while (this.cache.size > 16) {
+    while (this.cache.size > LRU_MAX) {
       const [k, p] = this.cache.entries().next().value;
       if (this.emUso && this.emUso.has(k)) break;
       this.cache.delete(k);
       p.then((t) => t && t.dispose());
     }
     return v;
+  }
+  pronta(rel) {
+    const v = rel && this.cache.get(rel);
+    return v && v.tx ? v : null;
+  }
+  solNaEstacao(estacao) {
+    const u = this.unidade, S = this.SOL;
+    if (!u || !S || !S.finais || u.final == null || this.finalRender == null) return true;
+    const mesma = mesmaFace(S, u, this.finalRender);
+    if (mesma == null) return true;
+    if (!mesma) return false;
+    const ku = S.unidades ? chaveUnidade(S, u) : null;
+    const d = ku != null && S.unidades[ku] && S.unidades[ku].est && S.unidades[ku].est[estacao];
+    return !!(d && d.cv && d.cv.includes("1"));
+  }
+  _prever(estado) {
+    if (this.liberado) return;
+    const C = this.p.camadas, est = estado.estacao, m = estado.minutos;
+    const v4 = !!(C.solvis && C.solvis[est] && C.albedo && C.normal && C.solind && C.solind[est]);
+    const sol = (v4 ? C.solind : C.sol) && (v4 ? C.solind : C.sol)[est] || {};
+    const horas = Object.keys(sol).map((k) => [+k.slice(0, 2) * 60 + +k.slice(3, 5), sol[k]]).sort((x, y) => x[0] - y[0]);
+    let el = -12;
+    try {
+      const s = solNoInstante(this.SOL, est, m);
+      if (Number.isFinite(s.el)) el = s.el;
+    } catch (e) {
+    }
+    if (this.solNaEstacao(est)) {
+      const i = horas.findIndex((h) => h[0] > m), j0 = i < 0 ? horas.length - 1 : i - 1;
+      for (let j = j0; j <= j0 + 3; j++) if (j >= 0 && j < horas.length && horas[j][1].arq) this.textura(horas[j][1].arq, false, false, v4 ? this.maxInd : this.max);
+      if (v4) {
+        this.textura(C.albedo.arq);
+        this.textura(C.normal.arq);
+        for (const a of [].concat(C.solvis[est].arq)) this.textura(a, true);
+      }
+    }
+    if (el < 10) {
+      for (const k of this.luzesNoite || []) if (C[k] && C[k].arq) {
+        this.textura(C[k].arq, false, !!C[k].joelho);
+        if (C[k].lo && this.comLo) this.textura(C[k].lo, false, true);
+      }
+    }
+  }
+  rtMeia() {
+    if (!this._rtMeia) {
+      const w = this.rt.width / 2;
+      this._rtMeia = new THREE.WebGLRenderTarget(w, w / 2, { type: this.rt.texture.type, depthBuffer: false, generateMipmaps: false });
+      this._rtMeia.texture.colorSpace = this.rt.texture.colorSpace;
+    }
+    return this._rtMeia;
   }
   soltarCamadas() {
     return this._naFila(() => {
@@ -517,7 +710,7 @@ void main(){
     if (!u || !S || !S.finais || this.finalRender == null) return false;
     return mesmaFace(S, u, this.finalRender) === false;
   }
-  plano({ estacao, minutos, luzes }) {
+  plano({ estacao, minutos, luzes, luzesAuto }, disp = null) {
     const s = solNoInstante(this.SOL, estacao, minutos);
     const fSol = this.fatorSolUnidade(estacao, minutos);
     const C = this.p.camadas;
@@ -542,10 +735,45 @@ void main(){
       const entre = ant !== void 0 && pos !== void 0 && pos - ant <= (v4 ? 150 : 120);
       const fa = entre ? (pos - minutos) / (pos - ant) : ant !== void 0 ? Math.max(0, 1 - (minutos - ant) / 60) : 0;
       const fb = entre ? 1 - fa : pos !== void 0 ? Math.max(0, 1 - (pos - minutos) / 60) : 0;
-      if (fa > 0) lista.push({ c: sol[nome(ant)], g: cs.map((x) => x * gs * fa) });
-      if (fb > 0) lista.push({ c: sol[nome(pos)], g: cs.map((x) => x * gs * fb) });
+      if (fa > 0) lista.push({ c: sol[nome(ant)], g: cs.map((x) => x * gs * fa), hora: ant, f: fa, ind: v4 });
+      if (fb > 0) lista.push({ c: sol[nome(pos)], g: cs.map((x) => x * gs * fb), hora: pos, f: fb, ind: v4 });
     }
-    for (const k of this.luzesOrdem) if (luzes && luzes[k] && C[k]) lista.push({ c: C[k], g: [1, 1, 1], luz: true });
+    const wAuto = pesoLuzNoite(el);
+    for (const k of this.luzesOrdem) {
+      if (!C[k]) continue;
+      const w = luzesAuto && (this.luzesNoite || []).includes(k) ? wAuto : luzes && luzes[k] ? 1 : 0;
+      if (w > 0) lista.push({ c: C[k], g: [w, w, w], luz: true });
+    }
+    let parcial = false;
+    if (disp) {
+      if (dir) {
+        const a = Math.min(...[C.albedo.arq, C.normal.arq, ...[].concat(dir.vis.arq)].map(disp));
+        if (a < 1) parcial = true;
+        dir = a > 0 ? { ...dir, g: dir.g.map((x) => x * a) } : null;
+      }
+      const ind = lista.filter((it) => it.hora !== void 0);
+      if (ind.length) {
+        const tot = ind.reduce((t, it) => t + it.f, 0), tem = ind.map((it) => it.f * disp(it.c.arq)), som = tem.reduce((t, x) => t + x, 0);
+        if (som < tot - 1e-6) parcial = true;
+        ind.forEach((it, i) => {
+          const k = som > 1e-6 ? tem[i] / som * (tot / it.f) : 0;
+          it.g = it.g.map((x) => x * k);
+        });
+        if (som <= 1e-6) {
+          let h = null;
+          for (const m of horas) if (Math.abs(m - minutos) <= 120 && disp(sol[nome(m)].arq) >= 1 && (h === null || Math.abs(m - minutos) < Math.abs(h - minutos))) h = m;
+          if (h !== null) lista.push({ c: sol[nome(h)], g: cs.map((x) => x * gs * tot), hora: h, f: tot, ind: v4 });
+        }
+      }
+      for (const it of lista) if (it.hora === void 0) {
+        const a = disp(it.c.arq);
+        if (a < 1) {
+          parcial = true;
+          it.g = it.g.map((x) => x * a);
+        }
+      }
+      for (let i = lista.length - 1; i >= 0; i--) if (!(lista[i].g[0] + lista[i].g[1] + lista[i].g[2] > 0)) lista.splice(i, 1);
+    }
     const media = [0, 0, 0];
     for (const it of lista) for (let i = 0; i < 3; i++) media[i] += it.g[i] * it.c.media[i];
     let mDentro = null, mFora = null, mDia = null;
@@ -569,20 +797,56 @@ void main(){
       }
     }
     if (dir && dir.media) for (let i = 0; i < 3; i++) media[i] += dir.g[i] * dir.media[i];
-    return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos, fSol };
+    return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos, fSol, parcial };
   }
   async _atualizar(estado) {
     if (this.liberado) return null;
     const usado = MisturaPonto.estadoDe(estado, this.luzesOrdem);
-    const pl = this.plano(estado);
-    this.emUso = new Set(pl.lista.map((it) => it.c.arq));
     const C = this.p.camadas;
-    const visArq = pl.dir ? [].concat(pl.dir.vis.arq) : [];
-    const tDir = pl.dir ? await Promise.all([this.textura(C.albedo.arq), this.textura(C.normal.arq), ...visArq.map((a) => this.textura(a, true))]) : null;
-    if (pl.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
+    const ult = this.ultimo && this.ultimo.estado, dM = ult ? Math.abs(ult.minutos - usado.minutos) : 1e9;
+    const segue = !SOL_ESPERA && !!ult && ult.estacao === usado.estacao && Math.min(dM, 1440 - dM) <= 60 && [C.ceu, C.fora].every((c) => !c || this.pronta(c.arq));
+    const agora = performance.now();
+    let emFade = false;
+    const disp = (arq) => {
+      const v = this.pronta(arq);
+      if (!v) return 0;
+      if (v.usada) return 1;
+      const t = Math.min(1, Math.max(0, (agora - v.em) / FADE));
+      if (t >= 1) {
+        v.usada = true;
+        return 1;
+      }
+      emFade = true;
+      return t * t * (3 - 2 * t);
+    };
+    const cheio = this.plano(estado);
+    const visArq = cheio.dir ? [].concat(cheio.dir.vis.arq) : [];
+    const pede = (it) => this.textura(it.c.arq, false, !!it.c.joelho, it.ind ? this.maxInd : this.max);
+    this.emUso = new Set(cheio.lista.map((it) => it.c.arq));
+    if (cheio.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
+    const pTx = cheio.lista.map(pede);
+    const pDir = cheio.dir ? [this.textura(C.albedo.arq), this.textura(C.normal.arq), ...visArq.map((a) => this.textura(a, true))] : [];
+    let pl, tx, tDir;
+    if (!segue) {
+      tDir = cheio.dir ? await Promise.all(pDir) : null;
+      tx = await Promise.all(pTx);
+      for (const p of [...pTx, ...pDir]) p.usada = true;
+      pl = cheio;
+    } else {
+      for (const p of [...pTx, ...pDir]) if (!p.tx && !p.aviso) {
+        p.aviso = true;
+        p.then(() => {
+          if (!this.liberado && this.aoRefinar) this.aoRefinar();
+        }, () => {
+        });
+      }
+      pl = this.plano(estado, disp);
+      for (const it of pl.lista) this.emUso.add(it.c.arq);
+      tx = pl.lista.map((it) => (this.pronta(it.c.arq) || {}).tx || null);
+      tDir = pl.dir ? [C.albedo.arq, C.normal.arq, ...visArq].map((a) => this.pronta(a).tx) : null;
+    }
     for (const it of pl.lista) if (it.c.lo && this.comLo) this.emUso.add(it.c.lo);
     const loP = pl.lista.map((it) => it.c.lo && this.comLo ? this.textura(it.c.lo, false, true) : null);
-    const tx = await Promise.all(pl.lista.map((it) => this.textura(it.c.arq, false, !!it.c.joelho)));
     const txLo = await Promise.all(loP.map((p) => p ? Promise.race([p, Promise.resolve(void 0)]) : null));
     if (this.liberado) return null;
     if (txLo.some((t) => t === void 0)) Promise.all(loP).then(() => {
@@ -713,8 +977,11 @@ void main(){
       const tac = prepassoAcesa(this.r, U);
       if (tac) U.tAc.value = tac;
     }
+    const tP = performance.now(), movendo = MEIA && segue && this._tPinta !== void 0 && tP - this._tPinta < 150;
+    this._tPinta = tP;
     const qs = new URLSearchParams(location.search).get("sloc"), sDia = qs !== null && qs !== "" ? +qs : 0.6;
     U.sLoc.value = 0;
+    U.usaChave.value = 0;
     if (sDia > 0) {
       U.modoLum.value = 1;
       this.r.setRenderTarget(this.rtLum);
@@ -722,56 +989,79 @@ void main(){
       U.modoLum.value = 0;
       this.r.setRenderTarget(this.rtLoc);
       this.r.render(this.cenaBorra, this.cam);
-      const chaveDe = (b) => {
-        let sl2 = 0, sw2 = 0;
-        for (let j = 0; j < 32; j++) {
-          const ca = Math.cos(((j + 0.5) / 32 - 0.5) * Math.PI);
-          for (let i = 0; i < 64; i++) {
-            const k = (j * 64 + i) * 4, w = b[k + 1] / 255 * ca;
-            sl2 += ((b[k] + b[k + 2] / 255) / 255 * 20 - 16) * w;
-            sw2 += w;
-          }
-        }
-        return [sl2, sw2];
-      };
-      let sl, sw;
-      const ant = this._anterior;
-      this._anterior = usado;
-      const seq = this._seq = (this._seq || 0) + 1;
-      const dMin = ant ? Math.abs(ant.minutos - usado.minutos) : 1e9, passo = Math.min(dMin, 1440 - dMin);
-      const continuo = !!ant && ant.estacao === usado.estacao && JSON.stringify(ant.luzes) === JSON.stringify(usado.luzes) && passo <= 60;
-      if (this._chaveLoc && performance.now() - this._chaveLoc.t < 1500 && continuo && this.r.readRenderTargetPixelsAsync) {
-        [sl, sw] = this._chaveLoc.v;
-        if (this._lendo) this._reler = true;
-        else {
-          this._lendo = true;
-          this._reler = false;
-          const b = new Uint8Array(64 * 32 * 4), chaveUsada = sw > 0 ? sl / sw : 0;
-          this.r.readRenderTargetPixelsAsync(this.rtLoc, 0, 0, 64, 32, b).then(() => {
-            const v = chaveDe(b);
-            if (!this._chaveLoc || this._chaveLoc.seq <= seq) this._chaveLoc = { v, t: performance.now(), seq };
-            if ((this._reler || Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - chaveUsada) > 0.1) && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
-          }).catch(() => {
-            this._chaveLoc = null;
-            if (this._reler && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
-          }).finally(() => {
-            this._lendo = false;
-            this._reler = false;
-          });
-        }
+      if (this.chaveGPU) {
+        this.r.setRenderTarget(this.rtLoc2);
+        this.r.render(this.cenaChave, this.cam);
+        const kq = new URLSearchParams(location.search).get("chave");
+        U.usaChave.value = 1;
+        U.chaveT.value = kq ? +kq : -4.3;
+        U.kDiaC.value = kDia;
+        U.lG.value = 0;
+        U.tLoc.value = this.rtLoc2.texture;
+        U.sLoc.value = sDia * (0.4 + 0.6 * kDia);
+        this._anterior = usado;
       } else {
-        this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
-        [sl, sw] = chaveDe(this.bufLoc);
-        this._chaveLoc = { v: [sl, sw], t: performance.now(), seq };
+        const chaveDe = (b) => {
+          let sl2 = 0, sw2 = 0;
+          for (let j = 0; j < 32; j++) {
+            const ca = Math.cos(((j + 0.5) / 32 - 0.5) * Math.PI);
+            for (let i = 0; i < 64; i++) {
+              const k = (j * 64 + i) * 4, w = b[k + 1] / 255 * ca;
+              sl2 += ((b[k] + b[k + 2] / 255) / 255 * 20 - 16) * w;
+              sw2 += w;
+            }
+          }
+          return [sl2, sw2];
+        };
+        let sl, sw;
+        const ant = this._anterior;
+        this._anterior = usado;
+        const seq = this._seq = (this._seq || 0) + 1;
+        const dMin = ant ? Math.abs(ant.minutos - usado.minutos) : 1e9, passo = Math.min(dMin, 1440 - dMin);
+        const continuo = !!ant && ant.estacao === usado.estacao && JSON.stringify(ant.luzes) === JSON.stringify(usado.luzes) && passo <= 60;
+        if (this._chaveLoc && performance.now() - this._chaveLoc.t < 1500 && continuo && this.r.readRenderTargetPixelsAsync) {
+          [sl, sw] = this._chaveLoc.v;
+          if (this._lendo) this._reler = true;
+          else {
+            this._lendo = true;
+            this._reler = false;
+            const b = new Uint8Array(64 * 32 * 4), chaveUsada = sw > 0 ? sl / sw : 0;
+            this.r.readRenderTargetPixelsAsync(this.rtLoc, 0, 0, 64, 32, b).then(() => {
+              const v = chaveDe(b);
+              if (!this._chaveLoc || this._chaveLoc.seq <= seq) this._chaveLoc = { v, t: performance.now(), seq };
+              if ((this._reler || Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - chaveUsada) > 0.1) && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
+            }).catch(() => {
+              this._chaveLoc = null;
+              if (this._reler && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
+            }).finally(() => {
+              this._lendo = false;
+              this._reler = false;
+            });
+          }
+        } else {
+          this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
+          [sl, sw] = chaveDe(this.bufLoc);
+          this._chaveLoc = { v: [sl, sw], t: performance.now(), seq };
+        }
+        U.lG.value = sw > 0 ? sl / sw : 0;
+        U.tLoc.value = this.rtLoc.texture;
+        U.sLoc.value = sDia * (0.4 + 0.6 * kDia);
+        const kq = new URLSearchParams(location.search).get("chave"), T = kq ? +kq : -4.3;
+        if (sw > 0) U.expo.value = 2 ** (Math.max(-1, Math.min(2, (T - U.lG.value) * 1)) * kDia);
       }
-      U.lG.value = sw > 0 ? sl / sw : 0;
-      U.tLoc.value = this.rtLoc.texture;
-      U.sLoc.value = sDia * (0.4 + 0.6 * kDia);
-      const kq = new URLSearchParams(location.search).get("chave"), T = kq ? +kq : -4.3;
-      if (sw > 0) U.expo.value = 2 ** (Math.max(-1, Math.min(2, (T - U.lG.value) * 1)) * kDia);
     }
-    this.r.setRenderTarget(this.rt);
+    const alvo = movendo ? this.rtMeia() : this.rt;
+    clearTimeout(this._tmCheio);
+    if (movendo) this._tmCheio = setTimeout(() => {
+      if (!this.liberado && this.aoRefinar) this.aoRefinar();
+    }, 200);
+    else if (emFade) this._tmCheio = setTimeout(() => {
+      if (!this.liberado && this.aoRefinar) this.aoRefinar();
+    }, 40);
+    const borda = BORDA && U.usaFora.value > 0.5 && U.tFora.value !== PRETO ? passoBorda(this.r, alvo, U.tFora.value) : null;
+    this.r.setRenderTarget(borda ? borda.rt : alvo);
     this.r.render(this.cena, this.cam);
+    if (borda) borda.aplica();
     this.r.setRenderTarget(null);
     this.ultimo = {
       ...pl,
@@ -779,18 +1069,48 @@ void main(){
       lG: U.lG.value + Math.log2(U.expo.value),
       estado: usado,
       veu: U.veuFora.value,
+      parcial: !!pl.parcial || movendo || emFade,
+      meia: movendo,
       bits12: pl.lista.map((it, i) => U.loIdx.value[i] >= 0 ? it.c.arq : null).filter(Boolean),
       bits8: pl.lista.map((it, i) => it.c.lo && U.loIdx.value[i] < 0 ? it.c.arq : null).filter(Boolean)
     };
-    return this.rt.texture;
+    if (U.usaChave.value) {
+      const u = this.ultimo;
+      u.expo = K * (this._mulChave || 1);
+      u.lG = this._lGChave ?? u.lG;
+      if (!movendo && !this._lendoChave) {
+        this._lendoChave = true;
+        const b = new Uint8Array(4), T = U.chaveT.value, kD = U.kDiaC.value;
+        this.r.readRenderTargetPixelsAsync(this.rtLoc2, 0, 32, 1, 1, b).then(() => {
+          if (b[1] > 127) {
+            const lg = (b[0] + b[2] / 255) / 255 * 20 - 16, mul = 2 ** (Math.max(-1, Math.min(2, T - lg)) * kD);
+            this._mulChave = mul;
+            this._lGChave = lg + Math.log2(mul);
+            u.expo = K * mul;
+            u.lG = this._lGChave;
+          }
+        }).catch(() => {
+        }).finally(() => {
+          this._lendoChave = false;
+        });
+      }
+    }
+    this._prever(estado);
+    return alvo.texture;
   }
   liberar() {
     this.liberado = true;
+    clearTimeout(this._tmCheio);
+    if (this._rtMeia) this._rtMeia.dispose();
     this.rt.dispose();
     this.mat.dispose();
     this.rtLum.dispose();
     this.rtLoc.dispose();
     this.matBorra.dispose();
+    if (this.rtLoc2) {
+      this.rtLoc2.dispose();
+      this.matChave.dispose();
+    }
     for (const p of this.cache.values()) p.then((t) => t && t.dispose());
   }
 }
@@ -807,5 +1127,6 @@ export {
   ceuDoSol,
   definirAlvo,
   dhiLux,
-  dniLux
+  dniLux,
+  pesoLuzNoite
 };

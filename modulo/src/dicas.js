@@ -56,7 +56,28 @@ function posicionarDica() {
   if (!dica) return;
   if (desktop()) {
     dica.style.top = "";
+    const n = document.querySelector(".topo .marca-nome"), aberto = document.body.classList.contains("painel-aberto");
+    const chave = innerWidth + "|" + aberto + "|" + (n ? n.offsetWidth : 0) + "|" + dica.hidden;
+    if (dica.dataset.a7 === chave) return;
+    dica.dataset.a7 = chave;
+    dica.style.left = dica.style.transform = dica.style.maxWidth = "";
+    if (!n || dica.hidden) return;
+    const rn = n.getBoundingClientRect(), r = dica.getBoundingClientRect(), bi = document.querySelector("#btn-legal");
+    const ri = bi && bi.offsetParent !== null ? bi.getBoundingClientRect() : null;
+    const toca = (q) => q && r.left < q.right + 12 && r.right > q.left - 12 && r.top < q.bottom && r.bottom > q.top;
+    if (!toca(rn) && !toca(ri)) return;
+    const p = aberto ? document.querySelector("#unidades") : null;
+    const x = Math.round(rn.right + 12);
+    let lim = (p && !p.hidden ? p.getBoundingClientRect().left : innerWidth) - 16;
+    if (ri && ri.left > x) lim = Math.min(lim, ri.left - 12);
+    dica.style.left = x + "px";
+    dica.style.transform = "none";
+    dica.style.maxWidth = Math.max(160, lim - x) + "px";
     return;
+  }
+  if (dica.dataset.a7) {
+    dica.dataset.a7 = "";
+    dica.style.left = dica.style.transform = dica.style.maxWidth = "";
   }
   const m = document.querySelector(".topo .marca");
   const y = m ? Math.round(m.getBoundingClientRect().bottom + 12) : 140;

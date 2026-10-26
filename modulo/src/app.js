@@ -1393,11 +1393,18 @@ montarGrade();
 montarFiltros();
 ligar();
 aplicarFiltro();
+const dentroNoInicio = /-dentro$/.test(location.hash || "");
 if (!deepLink() && params.has("semabertura")) fecharAbertura();
+if (!dentroNoInicio && (INICIO_TOUR.hora != null || INICIO_TOUR.estacao)) carregarSol().then((S) => {
+  if (INICIO_TOUR.estacao) S.rel.estacao(INICIO_TOUR.estacao);
+  if (INICIO_TOUR.hora != null) S.rel.hora(INICIO_TOUR.hora);
+}).catch(() => {
+});
 function estadoModulo(e) {
   document.documentElement.dataset.estado = e;
+  if (e === "pronto" && app.__cargaFim) app.__cargaFim();
   try {
-    if (window.parent !== window) window.parent.postMessage({ fonte: "modulo-3d", estado: e, sem3d: app.modo3d === "sem3d", ...e === "pronto" && app.__alvoVitrine ? app.__alvoVitrine() : {} }, "*");
+    if (window.parent !== window) window.parent.postMessage({ fonte: "modulo-3d", estado: e, sem3d: app.modo3d === "sem3d", ...e === "pronto" && app.__alvoVitrine ? app.__alvoVitrine() : e === "pronto" && app.__caixaPronto ? app.__caixaPronto() || {} : {} }, "*");
   } catch (er) {
   }
 }
@@ -1414,7 +1421,23 @@ if (window.parent !== window) {
     if (ev.source !== window.parent || !d || d.fonte !== "site") return;
     const a = app.interior && app.interior.api;
     if (!a || !a.estado) {
-      posta({ erro: { id: d.id, motivo: "tour-fechado" } });
+      const h0 = typeof d.hora === "number" ? Math.round(d.hora) : hhmm(d.hora);
+      if (d.irPara || (h0 == null || h0 < 0 || h0 >= 1440) && !d.estacao) {
+        posta({ erro: { id: d.id, motivo: "tour-fechado" } });
+        return;
+      }
+      try {
+        const S = await carregarSol();
+        if (d.estacao) S.rel.estacao(d.estacao);
+        if (h0 != null && h0 >= 0 && h0 < 1440) S.rel.hora(h0);
+        const t0 = performance.now();
+        while (document.documentElement.dataset.estado !== "pronto" && performance.now() - t0 < 3e4) await new Promise((r) => setTimeout(r, 100));
+        for (let k = 0; k < 3; k++) await new Promise((r) => requestAnimationFrame(r));
+        const i = S.rel.info(), ign = ["luzes", "reflexo"].filter((k) => d[k] != null);
+        posta({ pronto: { id: d.id, fora: { minutos: Math.round(i.t), estacao: i.est, noite: i.noite > 0.5 }, ...ign.length ? { ignorado: ign } : {} } });
+      } catch (er) {
+        posta({ erro: { id: d.id, motivo: String(er && er.message || er).slice(0, 120) } });
+      }
       return;
     }
     try {
@@ -1433,6 +1456,7 @@ if (window.parent !== window) {
       }
       const reduz = d.reduzido === true || matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (d.irPara && d.irPara.ponto && d.irPara.ponto !== a.estado().ponto) await a.irPara(d.irPara.ponto, reduz ? { dur: 1 } : {});
+      for (let k = 0; k < 2; k++) await new Promise((r) => requestAnimationFrame(r));
       const t0 = performance.now();
       while (performance.now() - t0 < 2e4) {
         const e = a.estado();
@@ -1516,6 +1540,118 @@ if (window.parent !== window) {
     setInterval(mandaAlvo, 250);
     addEventListener("resize", () => setTimeout(mandaAlvo, 50));
   }
+  if (params.get("caixa") === "1" && params.get("modo") !== "vitrine") {
+    let ult, tParado = 0, raf = 0, ligado = false, moveu = false, tUpd = 0;
+    const calc = () => {
+      const c = app.cena;
+      if (!c || !c.caixaNaTela) return null;
+      if (interiorAberto) return { predio: null };
+      const b = c.caixaNaTela();
+      return { predio: b ? { x0: Math.round(b.x0), y0: Math.round(b.y0), x1: Math.round(b.x1), y1: Math.round(b.y1) } : null };
+    };
+    app.__caixaPronto = () => {
+      const v = calc();
+      if (v) ult = JSON.stringify(v.predio);
+      return v;
+    };
+    const manda = (parado) => {
+      if (document.documentElement.dataset.estado !== "pronto") return;
+      const v = calc();
+      if (!v) return;
+      const sig = JSON.stringify(v.predio);
+      if (sig !== ult) {
+        ult = sig;
+        moveu = true;
+        posta(v);
+        if (performance.now() - tUpd > 300) {
+          clearTimeout(tParado);
+          tParado = setTimeout(() => manda(true), 400);
+        }
+      }
+      if (parado && moveu) {
+        moveu = false;
+        posta({ ...v, parado: true });
+      }
+    };
+    const pede = () => {
+      tUpd = performance.now();
+      if (!raf) raf = requestAnimationFrame(() => {
+        raf = 0;
+        manda(false);
+      });
+    };
+    setInterval(() => {
+      const c = app.cena;
+      if (!ligado && c && c.controls) {
+        ligado = true;
+        c.controls.addEventListener("update", pede);
+        c.controls.addEventListener("sleep", () => {
+          clearTimeout(tParado);
+          tParado = setTimeout(() => {
+            if (performance.now() - tUpd >= 240) manda(true);
+          }, 250);
+        });
+      }
+      manda(false);
+    }, 250);
+    addEventListener("resize", () => requestAnimationFrame(() => manda(false)));
+  }
+  const cidadeFalhou = () => !!(window.__g3d && /falhou|sem-chave|aparelho-leve/.test(window.__g3d.estado || ""));
+  const cidade = { lote0: null, pMax: 0, q: 0, tMostra: 0 };
+  const olhaCidade = () => {
+    const t = window.__g3dTiles, st = t && t.stats;
+    if (!st) return;
+    const pend = st.queued + st.downloading + st.parsing;
+    if (cidade.lote0 == null) cidade.lote0 = st.loaded;
+    const feitos = st.loaded - cidade.lote0;
+    if (pend > 0) cidade.pMax = Math.max(cidade.pMax, feitos / (feitos + pend));
+    cidade.q = pend === 0 && st.visible > 0 ? cidade.q + 1 : 0;
+    if (cidade.q >= 6) cidade.pMax = 1;
+  };
+  const carga = () => {
+    const c = app.cena;
+    if (!c) return { fracao: app.modo3d === "sem3d" ? 1 : 0.02, etapa: "modulo" };
+    const k = c.estadoCarga ? c.estadoCarga() : { quadro: true, google: "sem" };
+    const itens = [k.quadro, k.fachada, k.entorno].filter((x) => x != null);
+    const fP = itens.filter(Boolean).length / Math.max(1, itens.length);
+    const temCidade = k.google !== "desligado" && k.google !== "sem" && !cidadeFalhou();
+    const torre = !!k.quadro && k.fachada !== false;
+    if (!temCidade) return { fracao: 0.05 + 0.95 * fP, etapa: "predio", pronta: torre && fP >= 1 };
+    if (k.google === "mostrando" && !cidade.tMostra) cidade.tMostra = performance.now();
+    return { fracao: 0.05 + 0.25 * fP + 0.7 * cidade.pMax, etapa: torre ? "cidade" : "predio", pronta: torre && (cidade.q >= 6 || !!cidade.tMostra && performance.now() - cidade.tMostra >= 1500) };
+  };
+  {
+    let cSig = "", fMax = 0, fimMandado = false;
+    app.__cargaFim = () => {
+      if (fimMandado) return;
+      fimMandado = true;
+      posta({ carga: { fracao: 1, etapa: "pronto" } });
+    };
+    const tc = setInterval(() => {
+      if (fimMandado || document.documentElement.dataset.estado !== "carregando") {
+        clearInterval(tc);
+        return;
+      }
+      olhaCidade();
+      const v = carga();
+      fMax = Math.max(fMax, Math.min(0.99, v.fracao));
+      const m = { fracao: Math.round(fMax * 100) / 100, etapa: v.etapa };
+      const sig = JSON.stringify(m);
+      if (sig === cSig) return;
+      cSig = sig;
+      posta({ carga: m });
+    }, 250);
+  }
+  if (params.get("embutido") === "1" && params.get("modo") !== "vitrine") app.__esperaCidade = () => new Promise((ok) => {
+    const t0 = performance.now();
+    const olha = () => {
+      olhaCidade();
+      const v = carga();
+      if (interiorAberto || app.modo3d !== "3d" || v.pronta || performance.now() - t0 > 25e3) ok();
+      else setTimeout(olha, 250);
+    };
+    olha();
+  });
   let tourSig = "";
   setInterval(() => {
     const a = app.interior && app.interior.api;
@@ -1548,6 +1684,7 @@ iniciar3D().finally(async () => {
       console.error("vitrine", e);
     }
   }
+  if (app.__esperaCidade && document.documentElement.dataset.estado === "carregando") await app.__esperaCidade();
   if (document.documentElement.dataset.estado === "carregando") estadoModulo("pronto");
 });
 Object.assign(app, {

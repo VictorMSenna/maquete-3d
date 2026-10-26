@@ -2,7 +2,7 @@ import { capacidade, rebaixar } from "./capacidade.js";
 import { chaveLocal } from "./predio.js";
 import * as THREE from "three";
 import { SOL } from "./dados-sol.js";
-import { MisturaPonto, ROTULO, INFO, VEU } from "./render-mix.js";
+import { MisturaPonto, ROTULO, INFO, VEU, pesoLuzNoite } from "./render-mix.js";
 import { solNoInstante } from "./interior-sol.js";
 import { criarVistaGerada } from "./vista-gerada.js"; // E0 22/10: generated window view (demo)
 let atual = null, geracao = 0;
@@ -64,7 +64,7 @@ function luzesAuto(estacao, minutos) {
     if (Number.isFinite(s.el)) el = s.el;
   } catch (e) {
   }
-  return Object.fromEntries(CENA.luzes.map((k) => [k, el < -2 && CENA.luzesNoite.includes(k)]));
+  return Object.fromEntries(CENA.luzes.map((k) => [k, pesoLuzNoite(el) >= 0.5 && CENA.luzesNoite.includes(k)]));
 }
 const CHAVE_RETORNO = chaveLocal("tabela3d-360-retorno");
 function retorno360(numero) {
@@ -110,6 +110,7 @@ async function criar({
   }
   const estado = { estacao, minutos, luzes: { ...luzes || luzesDoCliente() || luzesAuto(estacao, minutos) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial(), reflexo: !!reflexo };
   if (luzes) guardaLuzesCliente(estado.luzes);
+  estado.luzesAuto = !luzesDoCliente();
   let G = null;
   let VG = null; // E0 22/10: generated window view (one image per facade, distant backdrop)
   const raiz = document.createElement("div");
@@ -235,6 +236,7 @@ async function criar({
       else e.refinar = true;
     };
     mix.refLuz = REF_LUZ;
+    mix.luzesNoite = CENA.luzesNoite;
     const e = { m, mix, pronto: null, refinar: false };
     esferas.set(id, e);
     return e;
@@ -243,7 +245,7 @@ async function criar({
   const pontoVisivel = () => destino || estado.ponto;
   function emDia(e) {
     const u = e.mix.ultimo;
-    if (!u || !u.estado || e.refinar) return false;
+    if (!u || !u.estado || e.refinar || u.parcial) return false;
     const s = u.estado;
     return s.estacao === estado.estacao && s.minutos === estado.minutos && u.veu === VEU.fora.value && s.reflexo === (estado.reflexo !== false) && CENA.luzes.every((k) => !!s.luzes[k] === !!estado.luzes[k]);
   }
@@ -592,6 +594,7 @@ async function criar({
         }
         desenha();
         if (pendente) continue;
+        if (e.mix.ultimo && e.mix.ultimo.parcial) break;
         if (emDia(esfera(pontoVisivel()))) break;
         if (++semPedido >= 3) break;
       }
@@ -632,6 +635,7 @@ async function criar({
   }
   raiz.querySelectorAll("[data-luz]").forEach((b) => b.addEventListener("click", () => {
     estado.luzes[b.dataset.luz] = !estado.luzes[b.dataset.luz];
+    estado.luzesAuto = false;
     guardaLuzesCliente(estado.luzes);
     marcaLuzes();
     repinta();
@@ -639,6 +643,7 @@ async function criar({
   function luzesPelaHora() {
     if (!luzesDoCliente()) {
       estado.luzes = luzesAuto(estado.estacao, estado.minutos);
+      estado.luzesAuto = true;
       marcaLuzes();
     }
   }
@@ -986,6 +991,7 @@ async function criar({
     },
     definirLuz: (n, l) => {
       estado.luzes[n] = !!l;
+      estado.luzesAuto = false;
       marcaLuzes();
       return repinta();
     },
