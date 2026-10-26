@@ -150,7 +150,7 @@ async function criar({
   }
   function botaoReflexo() {
     const p = PTS[pontoVisivel()];
-    bR.hidden = !(G && G.vidro || !!(p && p.camadas && p.camadas.fora));
+    bR.hidden = !(G && G.vidro || !!(p && p.camadas && p.camadas.fora && !p.camadas.vidro));
     bR.setAttribute("aria-pressed", String(estado.reflexo !== false));
     creditoReflexo();
   }

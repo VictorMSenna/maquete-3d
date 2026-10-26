@@ -89,6 +89,7 @@ uniform vec3 pufeCor;
 uniform float pufeLumP;
 uniform float camaFator;
 uniform float pufeModelo;
+uniform float pufeMatiz;
 uniform float corrimao;
 uniform float fatorFora;
 uniform float srgb;
@@ -193,6 +194,7 @@ void main(){
     vec3 sh = mix(vec3(lp), x, 0.5) * pufeGanho; // its own shading, as if the albedo were ~pufeGanho x lighter (less violet)
     sh /= 1.0 + dot(sh, vec3(0.2126, 0.7152, 0.0722)) / 0.12; // soft cap: the lit lower front seen from the balcony went white
     vec3 xp = sh + pufeAlb * corLuz * ambSala * ex * pufeAmb * pufeNoite;
+    { float lx = dot(xp, vec3(0.2126, 0.7152, 0.0722)); vec3 hue = pufeAlb / max(dot(pufeAlb, vec3(0.2126, 0.7152, 0.0722)), 1e-4); xp = mix(xp, lx * hue, pufeMatiz); }
     x = mix(x, xp, foP.y);
   }
   else if (camaFator < 0.999 && usaFora > 0.5 && modoLum < 0.5) { float cb = texture2D(tFora, vUv).b; x *= mix(1.0, camaFator, cb * (1.0 - clamp((pufeNoite - 1.0) / 0.6, 0.0, 1.0))); } // by day only: at night the spots already model the pillows
@@ -354,7 +356,7 @@ uniform float nInt;
 uniform float meioMin;
 ` + FRAG.slice(FRAG.indexOf("float acesaT("), FRAG.indexOf("#ifdef USA_AC", FRAG.indexOf("float acesaT("))) + "void main(){ gl_FragColor = vec4(acesa(vUv), 0.0, 0.0, 1.0); }";
 const AC = /* @__PURE__ */ new WeakMap();
-const BORDA = QS.get("borda") !== "0";
+const BORDA = QS.get("borda") === "1";
 const FRAG_BORDA = `precision highp float;
 varying vec2 vUv;
 uniform sampler2D tP;
@@ -488,7 +490,7 @@ class MisturaPonto {
         pufeNoite: { value: 1 },
         pufeCor: { value: new THREE.Vector3(...pufe.cor || [0, 0, 0]) },
         pufeLumP: { value: +new URLSearchParams(location.search).get("pufeL") || pufe.lumAntigo || 1 },
-        pufeModelo: { value: (pufe.modeloNoite || []).includes(ponto.id) ? 1 : 0 },
+        pufeModelo: { value: (pufe.modeloNoite || []).includes(ponto.id) ? 1 : 0 }, pufeMatiz: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeM'))) ? parseFloat(new URLSearchParams(location.search).get('pufeM')) : (pufe.matiz ?? 0) },
         corrimao: { value: new URLSearchParams(location.search).get("corrimao") !== "0" && (corrimao.pontos || []).includes(ponto.id) ? 1 : 0 },
         /* ?corrimao=0 = before (tests) */
         camaFator: { value: +new URLSearchParams(location.search).get("cama") || cama.fator || 1 },

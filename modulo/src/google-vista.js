@@ -35,6 +35,8 @@ const FOTO_LADO_W = capacidade().nivel === "topo" ? 2048 : 1024;
 const FOTO_MIN = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfmin")) || 99999;
 const FOTO_MB = (+(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfmb")) || (capacidade().nivel === "topo" ? capacidade().movel ? 900 : 1500 : capacidade().tilesMB)) * 1048576;
 const FOTO_N = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfn")) || (capacidade().nivel === "topo" ? 4 : 2);
+const RAPIDO = !(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfr") === "0");
+const ERRO_RAPIDO = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gferr2")) || ERRO_FOTO * 3;
 const desligadoPorUrl = () => /[?&]google3d=0/.test(location.search);
 async function chaveDaPagina() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
@@ -98,7 +100,7 @@ const LUZ_GLSL = `
   {
     vec3 cB = outgoingLight;
     outgoingLight = g3dGrade(cB * uLuz, uGrade); // C7 21/10: day grade (identity at night and in the window photo shots)
-    if (uNoiteG > 0.001 && uTerrExt > 0.0) {
+    if (uNoiteG > 0.001 && uTerrExt > 0.0${typeof location !== "undefined" && /[?&]g3dlz=0/.test(location.search) ? " && false" : ""}) { // ?g3dlz=0: street-light pools off (tests)
       vec2 rq = (vB5.xz + uTerrExt) / (2.0 * uTerrExt);
       if (all(greaterThan(rq, vec2(0.0))) && all(lessThan(rq, vec2(1.0)))) {
         vec3 lz = texture2D(uTerr, rq).rgb;
@@ -109,7 +111,22 @@ const LUZ_GLSL = `
     if (uNoiteG > 0.001) {
       vec3 nB = normalize(cross(dFdx(vB5), dFdy(vB5)));
       bool verde = cB.g > cB.r * 1.08 && cB.g > cB.b * 1.04;
-      if (!verde && abs(nB.y) < 0.5 && vB5.y > 3.5) {
+      float hLocJ = vB5.y;
+      if (uTerrExt > 0.0) { vec2 rqJ = (vB5.xz + uTerrExt) / (2.0 * uTerrExt); if (all(greaterThan(rqJ, vec2(0.0))) && all(lessThan(rqJ, vec2(1.0)))) hLocJ = vB5.y - (texture2D(uTerr, rqJ).b * 60.0 - 20.0); }
+      bool altoJ = true;
+      if (uMapaR.z > 0.0) {
+        vec2 uvJ = vec2((vB5.x - uMapaR.x) * uMapaR.z, 1.0 - (vB5.z - uMapaR.y) * uMapaR.z);
+        if (all(greaterThan(uvJ, vec2(0.0))) && all(lessThan(uvJ, vec2(1.0)))) {
+          vec2 eJ = vec2(2.5 * uMapaR.z, 0.0); float topoJ = -1.0; vec4 cJ;
+          cJ = texture2D(uMapaP, uvJ); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          cJ = texture2D(uMapaP, uvJ + eJ.xy); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          cJ = texture2D(uMapaP, uvJ - eJ.xy); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          cJ = texture2D(uMapaP, uvJ + eJ.yx); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          cJ = texture2D(uMapaP, uvJ - eJ.yx); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          altoJ = topoJ > 12.0 && vB5.y < topoJ - 1.5;
+        }
+      }
+      if (!verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
         vec2 tgv = normalize(vec2(-nB.z, nB.x) + 1e-5); float lado = floor(nB.x * 3.0) * 17.0 + floor(nB.z * 3.0) * 5.0; float alin = 1.0, temMapa = 0.0;
         if (uAngExt > 0.0) {
           vec2 ru = (vB5.xz + uAngExt) / (2.0 * uAngExt);
@@ -118,15 +135,22 @@ const LUZ_GLSL = `
             float t = atan(an.g * 2.0 - 1.0, an.r * 2.0 - 1.0) * 0.25;
             vec2 e1 = vec2(cos(t), sin(t)), e2 = vec2(-e1.y, e1.x);
             float d1 = dot(nB.xz, e1), d2 = dot(nB.xz, e2);
-            if (abs(d1) > abs(d2)) { tgv = e2; lado = sign(d1) * 17.0; } else { tgv = e1; lado = 40.0 + sign(d2) * 17.0; } temMapa = 1.0; alin = smoothstep(0.80, 0.90, max(abs(d1), abs(d2)) / max(length(nB.xz), 1e-4)); // triangles > ~30 deg off the facade (balcony zig-zag) get no window: they only made shards
+            if (abs(d1) > abs(d2)) { tgv = e2; lado = sign(d1) * 17.0; } else { tgv = e1; lado = 40.0 + sign(d2) * 17.0; } temMapa = 1.0; alin = smoothstep(0.95, 0.985, max(abs(d1), abs(d2)) / max(length(nB.xz), 1e-4)); /* JANELAS-GIGANTES 26/10: was 0.88..0.95 (up to 28 deg off: parallelograms) */ // triangles > ~30 deg off the facade (balcony zig-zag) get no window: they only made shards
           }
         }
         float sF = dot(vB5.xz, tgv);
         vec2 cel = vec2(floor(sF / 3.1), floor(vB5.y / 2.85));
         vec2 f = vec2(fract(sF / 3.1), fract(vB5.y / 2.85));
-        float jan = smoothstep(0.20, 0.24, f.x) * (1.0 - smoothstep(0.76, 0.80, f.x)) * smoothstep(0.34, 0.38, f.y) * (1.0 - smoothstep(0.84, 0.88, f.y));
+        float jan = smoothstep(0.24, 0.28, f.x) * (1.0 - smoothstep(0.72, 0.76, f.x)) * smoothstep(0.34, 0.38, f.y) * (1.0 - smoothstep(0.84, 0.88, f.y)); // JANELAS-GIGANTES 26/10: 1.49 x 1.43 m (was 1.74 m wide)
         float id = g3dH21(cel + lado + floor(vB5.xz / 40.0) * 3.1);
-        jan *= mix(1.0, alin, temMapa);${typeof location !== "undefined" && /[?&]gangdbg=1/.test(location.search) ? " outgoingLight = vec3(temMapa, alin, jan) * 0.6; cB = vec3(0.0);" : ""} // ?gangdbg=1: R = facade map here, G = triangle on the facade axis, B = window
+        jan *= mix(1.0, alin, temMapa) * (uAngExt > 0.0 ? temMapa : 1.0); // RODADA 26/10: inside our facade map only (off-map triangles made loose patches)${typeof location !== "undefined" && /[?&]gangdbg=1/.test(location.search) ? " outgoingLight = vec3(temMapa, alin, jan) * 0.6; cB = vec3(0.0);" : ""} // ?gangdbg=1: R = facade map here, G = triangle on the facade axis, B = window
+        float gxJ = length(dFdx(vB5)), gyJ = length(dFdy(vB5));
+        jan *= 1.0 - smoothstep(2.5, 4.0, max(gxJ, gyJ) / max(min(gxJ, gyJ), 1e-4));
+        vec3 camJ = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
+        jan *= smoothstep(0.30, 0.45, abs(dot(nB, normalize(camJ - vB5))));
+        jan *= 1.0 - smoothstep(0.08, 0.16, abs(nB.y));
+        jan *= 1.0 - smoothstep(0.05, 0.15, length(fwidth(nB)));
+        if (uPertoJ > 0.5) jan *= smoothstep(45.0, 90.0, length(camJ - vB5));
         float acesa = step(id, uFracG) * jan;
         float lum = dot(cB, vec3(0.2126, 0.7152, 0.0722));
         float vidro = 1.0 - smoothstep(0.18, 0.5, lum);
@@ -268,6 +292,7 @@ function iniciarGoogle() {
           s._recFeito = false;
           if (s.recorte) {
             s.recorte.vizN.value = 0;
+            s.recorte.perto.value = 0;
             s.recorte.mapaR.value.w = 0;
             s.recorte.ret.value.set(1, 1, 0, 0);
           }
@@ -303,6 +328,7 @@ function iniciarGoogle() {
         luz: { value: new THREE.Vector3(1, 1, 1) },
         noite: { value: 0 },
         frac: { value: 0.25 },
+        perto: { value: 0 },
         grade: { value: new THREE.Vector4(1, 1, 1, 0.18) },
         nit: { value: C8.nitidez },
         viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) },
@@ -330,6 +356,7 @@ function iniciarGoogle() {
         sh.uniforms.uLuz = s.recorte.luz;
         sh.uniforms.uNoiteG = s.recorte.noite;
         sh.uniforms.uFracG = s.recorte.frac;
+        sh.uniforms.uPertoJ = s.recorte.perto;
         sh.uniforms.uGrade = s.recorte.grade;
         sh.uniforms.uNitG = s.recorte.nit;
         sh.uniforms.uViz = s.recorte.viz;
@@ -343,7 +370,7 @@ function iniciarGoogle() {
         sh.uniforms.uAng = s.recorte.ang;
         sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = "uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;");
-        sh.fragmentShader = "uniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\nuniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n" + GRADE_GLSL + "uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n" + FANT_GLSL + sh.fragmentShader.replace("#include <map_fragment>", NIT_GLSL).replace("#include <opaque_fragment>", LUZ_GLSL + "\n#include <opaque_fragment>").replace(
+        sh.fragmentShader = "uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\nuniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n" + GRADE_GLSL + "uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n" + FANT_GLSL + sh.fragmentShader.replace("#include <map_fragment>", NIT_GLSL).replace("#include <opaque_fragment>", LUZ_GLSL + "\n#include <opaque_fragment>").replace(
           "void main() {",
           "void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;\n#ifndef G3D_PLANO\n  if (uVizN > 0.5 && g3dNoViz(vB5)) discard;\n#endif"
         );
@@ -675,7 +702,7 @@ class VistaGoogle {
       const falta = this.facesDaJanela().filter((f) => !F2.faces.includes(f)).slice(0, 4 - F2.faces.length);
       if (falta.length) {
         if (F2.feito) {
-          F2.i = F2.faces.length;
+          F2.k = F2.faces.length;
           F2.reg = 0;
           F2.fila = null;
           F2.t0 = agora;
@@ -691,6 +718,11 @@ class VistaGoogle {
           } catch (e) {
           }
         }
+        if (RAPIDO && F2.nRapido >= F2.faces.length) {
+          F2.nRapido = F2.faces.length;
+          F2.tR0 = agora;
+          F2.quietosR = 0;
+        }
         for (const f of falta) {
           F2.faces.push(f);
           F2.alvos.push({ A: alvo(FOTO_LADO), W: alvo(FOTO_LADO_W) });
@@ -703,7 +735,11 @@ class VistaGoogle {
       F2.dirsVistos = this.dirs;
       F2.matriz = this.matriz.clone();
       F2.faces = this.facesDaJanela();
+      F2.k = 0;
+      F2.nRapido = RAPIDO ? 0 : 99;
       F2.i = 0;
+      F2.tR0 = agora;
+      F2.quietosR = 0;
       F2.reg = 0;
       F2.t0 = agora;
       F2.feito = false;
@@ -761,6 +797,71 @@ class VistaGoogle {
       this.acordar();
       return;
     }
+    if (F2.nRapido < F2.faces.length) {
+      const L0 = FOTO_LADO, t2 = this.s.tiles, fr = F2.nRapido, base2 = F2.cams[F2.faces[fr]];
+      if (!F2.selR) F2.selR = new THREE.PerspectiveCamera(90, 1, 3, RAIO);
+      const cam2 = F2.selR;
+      cam2.quaternion.copy(base2.quaternion);
+      cam2.position.set(0, 0, 0);
+      cam2.up.copy(base2.up);
+      cam2.clearViewOffset();
+      cam2.updateProjectionMatrix();
+      cam2.updateMatrixWorld(true);
+      this.s.tomar(this, this.s.escena, F2.matriz || this.matriz, cam2, ERRO_RAPIDO);
+      this._planosAplica();
+      if (t2.cameras.length !== 1 || t2.cameras[0] !== cam2) {
+        for (const c of [...t2.cameras]) t2.deleteCamera(c);
+        t2.setCamera(cam2);
+      }
+      t2.setResolution(cam2, L0, L0);
+      this.s.escena.updateMatrixWorld(true);
+      t2.update();
+      const st2 = t2.stats, pend2 = st2.queued + st2.downloading + st2.parsing, tempo2 = agora - F2.tR0;
+      F2.semFilaR = pend2 === 0 ? (F2.semFilaR || 0) + 1 : 0;
+      F2.quietosR = pend2 === 0 && (t2.loadProgress === void 0 || t2.loadProgress >= 1 || F2.semFilaR >= 30) ? (F2.quietosR || 0) + 1 : 0;
+      F2.prog = Math.min(0.99, (fr + 0.5) / F2.faces.length) * 0.5;
+      if (F2.quietosR >= 3 && tempo2 > 150 || tempo2 > 15e3) {
+        const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F2.alvos[fr];
+        const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
+        r.setClearColor(0, 0);
+        this._semFantasma();
+        for (const [rt, lado, liga] of [[al.A, FOTO_LADO, true], [al.W, FOTO_LADO_W, false]]) {
+          if (liga) {
+            R.luz.value.set(1, 1, 1);
+            R.noite.value = 0;
+            R.grade.value.set(1, 1, 1, 0.18);
+          } else {
+            R.luz.value.set(0, 0, 0);
+            R.noite.value = 1;
+          }
+          F2.limpos.add(rt);
+          rt.scissorTest = false;
+          rt.viewport.set(0, 0, lado, lado);
+          r.setRenderTarget(rt);
+          r.clear();
+          r.render(this.s.escena, cam2);
+        }
+        R.luz.value.copy(luz0);
+        R.noite.value = noite0;
+        R.grade.value.copy(grade0);
+        r.setRenderTarget(ant);
+        r.setClearColor(cc, ca);
+        F2.log.push({ f: F2.faces[fr], rapido: true, ms: Math.round(tempo2), vis: st2.visible });
+        F2.nRapido++;
+        F2.tR0 = agora;
+        F2.quietosR = 0;
+        F2.semFilaR = 0;
+        F2.i = Math.max(F2.nRapido, F2.k);
+        F2.t0 = agora;
+        if (F2.nRapido >= F2.faces.length && !this.pronto) {
+          this.pronto = true;
+          this.tPronto = agora;
+        }
+        this.atualizaCredito();
+      }
+      this.acordar();
+      return;
+    }
     const N = FOTO_N, L = FOTO_LADO;
     if (!F2.fila) {
       F2.fila = [];
@@ -768,7 +869,7 @@ class VistaGoogle {
       F2.feitosF = 0;
     }
     const [x, y, w] = F2.fila[0];
-    const t = this.s.tiles, base = F2.cams[F2.faces[F2.i]];
+    const t = this.s.tiles, base = F2.cams[F2.faces[F2.k]];
     if (!F2.sel) F2.sel = new THREE.PerspectiveCamera(90, 1, 3, RAIO);
     const cam = F2.sel;
     cam.quaternion.copy(base.quaternion);
@@ -787,7 +888,7 @@ class VistaGoogle {
     this.s.escena.updateMatrixWorld(true);
     t.update();
     const st = t.stats, pend = st.queued + st.downloading + st.parsing, tempo = agora - F2.t0;
-    F2.prog = (F2.i + Math.min(0.99, F2.feitosF / (L * L))) / F2.faces.length;
+    F2.prog = (F2.k + Math.min(0.99, F2.feitosF / (L * L))) / F2.faces.length;
     F2.semFila = pend === 0 ? (F2.semFila || 0) + 1 : 0;
     F2.quietos = pend === 0 && (t.loadProgress === void 0 || t.loadProgress >= 1 || F2.semFila >= 30) ? (F2.quietos || 0) + 1 : 0;
     const cheio = t.lruCache.isFull();
@@ -807,8 +908,8 @@ class VistaGoogle {
     }
     if (F2.quietos >= 3 && tempo > 200 || cheio && pend === 0 && tempo > 12e3 || tempo > 6e4) {
       F2.quietos = 0;
-      F2.log.push({ f: F2.faces[F2.i], r: F2.reg, ms: Math.round(tempo), cheio: t.lruCache.isFull(), mb: Math.round(t.lruCache.cachedBytes / 1048576), vis: st.visible });
-      const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F2.alvos[F2.i];
+      F2.log.push({ f: F2.faces[F2.k], r: F2.reg, ms: Math.round(tempo), cheio: t.lruCache.isFull(), mb: Math.round(t.lruCache.cachedBytes / 1048576), vis: st.visible });
+      const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F2.alvos[F2.k];
       const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
       r.setClearColor(0, 0);
       const pinta = (rt, lado, ms) => {
@@ -865,13 +966,14 @@ class VistaGoogle {
       if (!F2.fila.length) {
         F2.fila = null;
         F2.reg = 0;
-        F2.i++;
+        F2.k++;
       }
-      if (F2.i >= 1 && !this.pronto) {
+      F2.i = Math.max(F2.nRapido >= 99 ? 0 : F2.nRapido, F2.k);
+      if (F2.k >= 1 && !this.pronto && !RAPIDO) {
         this.pronto = true;
         this.tPronto = agora;
       }
-      if (F2.i >= F2.faces.length && !F2.extras && F2.faces.length < 4) {
+      if (F2.k >= F2.faces.length && !F2.extras && F2.faces.length < 4) {
         F2.extras = true;
         const p0 = F2.faces[0], viz = p0 < 2 ? [4, 5] : p0 > 3 ? [0, 1] : [];
         const add = [...viz, 3].filter((f) => !F2.faces.includes(f)).slice(0, 4 - F2.faces.length);
@@ -894,7 +996,7 @@ class VistaGoogle {
           }
         }
       }
-      if (F2.i >= F2.faces.length) {
+      if (F2.k >= F2.faces.length) {
         F2.feito = true;
         this._soltaMS();
         cam.clearViewOffset();
@@ -1573,6 +1675,7 @@ async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, esconder
           const voltando = !!s.dono && mostrando;
           s.tomar(api, scene, m, camSelFora, ERRO_360 * 1.25);
           s.pintar(ganhoCena);
+          s.recorte.perto.value = 1;
           if (voltando) {
             refino = { lote0: null, pMax: 0, t0: performance.now() };
             carga.querySelector("b").style.width = "4%";

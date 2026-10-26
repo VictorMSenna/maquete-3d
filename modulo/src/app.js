@@ -345,7 +345,6 @@ function abrirUnidade(id) {
         class: "pilula-360 cd-360",
         id: "cd-360",
         hidden: true,
-        "aria-label": "Entrar no apartamento: tour 360° por dentro",
         onclick: (e) => {
           e.stopPropagation();
           entrarApartamento(u.id);
@@ -400,7 +399,7 @@ function abrirUnidade(id) {
       el("h3", { text: "Similares disponíveis" }),
       el("div", { class: "cd-sim-l" }, ...sims.map((v) => el(
         "button",
-        { type: "button", class: "cd-sim-b", "data-num": v.numero, onclick: () => abrirUnidade(v.id), "aria-label": `Unidade ${v.numero}, ${precoCheio(v.preco_total)}` },
+        { type: "button", class: "cd-sim-b", "data-num": v.numero, onclick: () => abrirUnidade(v.id) },
         el("b", {}, "Unid. ", el("span", { class: "mono", text: v.numero })),
         el("span", { class: "mono", text: precoMi(v.preco_total) })
       )))
@@ -944,6 +943,7 @@ async function entrarApartamento(id, { semAnimacao = false } = {}) {
     app.interior = { id, stub: !!M.stub, tour360: !!M.tour360, api };
     if (M.tour360) DICAS.dentro($("#interior-cena"));
     try {
+      if (params.get("historico") === "site") throw new Error("historico do site");
       history.pushState({ interior: id }, "", `#u${u.numero}-dentro`);
       historicoEmpurrado = true;
     } catch (e) {
@@ -1419,6 +1419,10 @@ if (window.parent !== window) {
   window.addEventListener("message", async (ev) => {
     const d = ev.data;
     if (ev.source !== window.parent || !d || d.fonte !== "site") return;
+    if (d.voltar === "inicio" || d.passo) {
+      if (app.__navega) await app.__navega(d);
+      return;
+    }
     const a = app.interior && app.interior.api;
     if (!a || !a.estado) {
       const h0 = typeof d.hora === "number" ? Math.round(d.hora) : hhmm(d.hora);
@@ -1472,7 +1476,7 @@ if (window.parent !== window) {
   });
   if (params.get("cred") === "site") {
     const st = document.createElement("style");
-    st.textContent = ".g3d-cred,.t360-vg-credito{display:none!important}";
+    st.textContent = ".g3d-cred,.t360-vg-credito,#btn-foto-real{display:none!important}";
     document.head.appendChild(st);
     let credSig = null;
     setInterval(() => {
@@ -1652,6 +1656,121 @@ if (window.parent !== window) {
     };
     olha();
   });
+  const doisQ = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+  let inicioCam = null, inicioPainel = null, passoSig = "", navegando = false;
+  const passoAtual = () => {
+    if (interiorAberto && app.interior) {
+      const e = app.interior.api && app.interior.api.estado ? app.interior.api.estado() : null;
+      const u = porId.get(app.interior.id);
+      return { nome: "tour", unidade: u ? u.numero : null, ponto: e ? e.ponto : null, andando: !!(e && e.andando) };
+    }
+    if (!$("#card").hidden && app.unidade) return { nome: "cartao", unidade: porId.get(app.unidade)?.numero ?? null, ponto: null };
+    return { nome: "fora", unidade: null, ponto: null };
+  };
+  const sigDe = (p) => p.nome + "|" + p.unidade + "|" + p.ponto;
+  const soPasso = (p) => ({ nome: p.nome, unidade: p.unidade, ponto: p.ponto });
+  const camParada = async (ms) => {
+    const c = app.cena && app.cena.controls, t0 = performance.now();
+    let q = 0;
+    while (c && performance.now() - t0 < ms && q < 2) {
+      await espera(100);
+      q = c.active ? 0 : q + 1;
+    }
+  };
+  setInterval(() => {
+    if (document.documentElement.dataset.estado !== "pronto" || navegando) return;
+    const p = passoAtual();
+    const c = app.cena && app.cena.controls;
+    if (!inicioCam && c && p.nome === "fora" && !c.active && $("#abertura").hidden) {
+      const V = app.cena.camera.position.constructor;
+      inicioCam = { p: c.getPosition(new V()), t: c.getTarget(new V()), f: c.getFocalOffset(new V()), z: app.cena.camera.zoom };
+      inicioPainel = !$("#unidades").hidden;
+    }
+    if (p.andando) return;
+    const sig = sigDe(p);
+    if (sig === passoSig) return;
+    const inicial = !passoSig;
+    passoSig = sig;
+    posta({ passo: soPasso(p), ...inicial ? { inicial: true } : {} });
+  }, 250);
+  app.__navega = async (d) => {
+    navegando = true;
+    try {
+      const alvo = d.voltar === "inicio" ? { nome: "fora" } : d.passo || {};
+      const nome = alvo.nome;
+      if (!["fora", "cartao", "tour"].includes(nome)) {
+        posta({ erro: { id: d.id, motivo: "passo-invalido" } });
+        return;
+      }
+      const u = nome === "fora" ? null : porNumero.get(String(alvo.unidade));
+      if (nome !== "fora" && !u) {
+        posta({ erro: { id: d.id, motivo: "unidade-invalida" } });
+        return;
+      }
+      const t0 = performance.now();
+      while (document.documentElement.dataset.estado !== "pronto" && performance.now() - t0 < 3e4) await espera(100);
+      for (const s of ["#galeria", "#legal", "#int-detalhes"]) {
+        const e = $(s);
+        if (e) e.hidden = true;
+      }
+      fecharAbertura();
+      if (app.vista === "foto" && app.modo3d !== "sem3d") mostrarVista("3d");
+      if (interiorAberto && !(nome === "tour" && app.interior && app.interior.id === u.id)) {
+        sairApartamento("site");
+        await doisQ();
+        if (nome === "fora") await espera(1e3);
+      }
+      if (nome === "fora") {
+        if (!$("#card").hidden) fecharCard();
+        if (inicioPainel != null && $("#unidades").hidden === inicioPainel) painelUnidades(inicioPainel);
+        await doisQ();
+        const c = app.cena && app.cena.controls;
+        if (app.cena && app.cena.irVista) app.cena.irVista("inicio");
+        if (c && inicioCam) {
+          const { p, t, f, z } = inicioCam;
+          c.setLookAt(p.x, p.y, p.z, t.x, t.y, t.z, true);
+          c.setFocalOffset(f.x, f.y, f.z, true);
+          c.zoomTo(z, true);
+        }
+        await doisQ();
+        await camParada(5e3);
+      } else if (nome === "cartao") {
+        if ($("#card").hidden || app.unidade !== u.id) abrirUnidade(u.id);
+        await doisQ();
+        await camParada(5e3);
+      } else {
+        if (!interiorAberto) {
+          if ($("#card").hidden || app.unidade !== u.id) abrirUnidade(u.id);
+          await entrarApartamento(u.id, { semAnimacao: true });
+        }
+        let a = null;
+        const t1 = performance.now();
+        while (performance.now() - t1 < 3e4 && !(a = app.interior && app.interior.api && app.interior.api.estado ? app.interior.api : null)) await espera(100);
+        if (!a) throw new Error("tour-nao-abriu");
+        if (alvo.ponto && a.estado().ponto !== alvo.ponto) await a.irPara(alvo.ponto, { dur: 1 });
+        const t2 = performance.now();
+        while (performance.now() - t2 < 2e4) {
+          const e = a.estado();
+          if (e.emDia && !e.andando) break;
+          await espera(100);
+        }
+        if (alvo.ponto && a.estado().ponto !== alvo.ponto) {
+          passoSig = sigDe(passoAtual());
+          posta({ erro: { id: d.id, motivo: "ponto-invalido" } });
+          return;
+        }
+      }
+      await doisQ();
+      const p = passoAtual();
+      passoSig = sigDe(p);
+      posta(nome === "fora" ? { id: d.id, estado: "inicio", passo: soPasso(p) } : { id: d.id, passo: soPasso(p), restaurado: true });
+    } catch (er) {
+      posta({ erro: { id: d.id, motivo: String(er && er.message || er).slice(0, 120) } });
+    } finally {
+      navegando = false;
+    }
+  };
   let tourSig = "";
   setInterval(() => {
     const a = app.interior && app.interior.api;
