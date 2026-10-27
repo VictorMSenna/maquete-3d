@@ -127,7 +127,108 @@ const LUZ_GLSL = `
           altoJ = topoJ > 12.0 && vB5.y < topoJ - 1.5;
         }
       }
-      if (!verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
+      float janT = -1.0; vec2 celT = vec2(0.0);
+      float faceMap = 0.0; // JANELAS-NOITE: this face has an authored map (grid or balcony band); else the far-city rule below applies
+      float mapaOk = 0.0, mapaU = 0.0, mapaH = 0.0, mapaRow = 0.0; // JANELAS-NOITE: wall entry point of the camera ray
+      float uT = 0.0, hT = 0.0, uST = 0.0, bayT = 3.1, hbT = 0.0; vec2 clT = vec2(0.0); float boxT = 0.0, faceT = 0.0; vec2 nFJ = vec2(1.0, 0.0); // JANELAS-COMBINADAS
+      if (uJanN > 0.5 && uPertoJ < 0.5) {
+        vec3 camN = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
+        for (int i = 0; i < 32; i++) {
+          if (float(i) >= uJanN) break;
+          vec4 a = uJanB[2 * i], b = uJanB[2 * i + 1];
+          vec2 e1 = b.xy, e2 = vec2(-b.y, b.x), dq = vB5.xz - a.xy, q = vec2(dot(dq, e1), dot(dq, e2));
+          if (abs(q.x) > a.z + 4.0 || abs(q.y) > a.w + 4.0 || vB5.y < b.z - 1.0 || vB5.y > b.w + 2.0) continue;
+          janT = 0.0; // a footprint building: its windows come only from its wall planes
+          if (b.w - b.z < 12.0) break; // low block (1-3 storeys, often under trees): no lit window (cells there were cut into flecks)
+          vec2 dc = camN.xz - a.xy, qc = vec2(dot(dc, e1), dot(dc, e2));
+          vec3 o = vec3(qc.x, camN.y, qc.y), D = vec3(q.x - qc.x, vB5.y - camN.y, q.y - qc.y);
+          vec3 iD = 1.0 / (D + sign(D) * 1e-5 + step(abs(D), vec3(0.0)) * 1e-5);
+          vec3 t1 = (vec3(-a.z, b.z, -a.w) - o) * iD, t2 = (vec3(a.z, b.w, a.w) - o) * iD;
+          vec3 tn = min(t1, t2), tf = max(t1, t2);
+          float tE = max(max(tn.x, tn.y), tn.z), tS = min(min(tf.x, tf.y), tf.z);
+          if (!(tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z)) && abs(nB.y) < 0.75 && abs(dot(normalize(nB.xz + 1e-6), tn.x >= tn.z ? e1 : e2)) > 0.35) { bool fxM = tn.x >= tn.z; vec3 PM = o + tE * D; mapaOk = 1.0; mapaU = fxM ? PM.z : PM.x; mapaH = PM.y;
+            mapaRow = float(i) * 4.0 + (fxM ? (PM.x > 0.0 ? 0.0 : 1.0) : (PM.z > 0.0 ? 2.0 : 3.0)); }
+          if (tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z) || abs(nB.y) > 0.6) break; // missed the box, entered by the roof, or an up-facing fragment
+          bool fx = tn.x >= tn.z;
+          if ((fx ? abs(abs(q.x) - a.z) : abs(abs(q.y) - a.w)) > 3.0) break; // the fragment is not on that wall (lower houses inside a block rectangle made flecks)
+          vec3 P = o + tE * D;
+          float ao = fx ? a.w : a.z, u = fx ? P.z : P.x;
+          float nb = max(1.0, floor(2.0 * ao / 3.1)), bay = 2.0 * ao / nb;
+          vec2 cc = vec2((u + ao) / bay, (P.y - b.z) / 2.85), fr = fract(cc), cl = floor(cc);
+          float dentro = step(0.6, cl.x * bay) * step(0.6, 2.0 * ao - (cl.x + 1.0) * bay) * step(1.0, cl.y) * step(b.z + (cl.y + 1.0) * 2.85, b.w - 1.0); // whole cells only (a cell cut by the roof line or a corner made slivers)
+          janT = dentro; uT = u; hT = P.y; uST = -ao + cl.x * bay; bayT = bay; hbT = b.z + cl.y * 2.85; clT = cl; boxT = float(i);
+          faceT = fx ? (P.x > 0.0 ? 0.0 : 1.0) : (P.z > 0.0 ? 2.0 : 3.0); nFJ = fx ? e1 : e2;
+          celT = cl + vec2(float(i) * 37.0 + (fx ? 0.0 : 17.0) + ((fx ? P.x : P.z) > 0.0 ? 5.0 : 0.0), 0.0);
+          break;
+        }
+      }
+      float fwU = 1.5 * fwidth(uT), fwH = 1.5 * fwidth(hT);
+      if (janT >= 0.0) {
+        if (mapaOk > 0.5) {
+          int rowM = int(mapaRow); float uT = mapaU, hT = mapaH;
+          vec4 pA = texelFetch(uJanMap, ivec2(0, rowM), 0), pB = texelFetch(uJanMap, ivec2(1, rowM), 0);
+          vec4 sA = texelFetch(uJanMap, ivec2(80, rowM), 0), sB = texelFetch(uJanMap, ivec2(81, rowM), 0);
+          faceMap = max(step(0.5, pA.z) * step(0.5, pB.z), step(0.5, sB.w));
+          if (sB.w > 0.5 && uNoiteG > 0.001 && uT > sA.x && uT < sA.y) {
+            float rS = floor((hT - sA.z) / sA.w + 0.5);
+            if (rS >= 0.0 && rS < sB.x) {
+              float lhS = hT - (sA.z + rS * sA.w), uu = (uT - sA.x) / sB.z, un = floor(uu), fu = fract(uu);
+              vec2 aaS = max(vec2(fwidth(uT), fwidth(hT)), vec2(1e-3));
+              float banda = smoothstep(-aaS.y * 1.5, aaS.y * 1.5, 0.5 * sB.y - abs(lhS)) * smoothstep(0.0, 0.08 + aaS.x / sB.z, min(fu, 1.0 - fu));
+              vec2 idS = vec2(un, rS) + vec2(float(rowM) * 53.0, 7.0);
+              float hr2 = uJanHora / 60.0; hr2 = hr2 < 12.0 ? hr2 + 24.0 : hr2;
+              float occS = hr2 < 19.0 ? mix(0.30, 0.45, clamp((hr2 - 17.0) / 2.0, 0.0, 1.0)) : hr2 < 21.0 ? mix(0.45, 0.38, (hr2 - 19.0) / 2.0) : hr2 < 23.0 ? mix(0.38, 0.22, (hr2 - 21.0) / 2.0) : hr2 < 26.0 ? mix(0.22, 0.08, (hr2 - 23.0) / 3.0) : 0.08;
+              float ligaS = step(g3dH21(idS), occS);
+              float cortS = 0.55 + 0.45 * smoothstep(0.15, 0.85, 0.5 + 0.5 * sin(6.2832 * (fu * (1.5 + g3dH21(idS + 2.0)) + g3dH21(idS + 5.0))));
+              vec3 corS = mix(vec3(1.0, 0.62, 0.32), vec3(1.0, 0.78, 0.55), g3dH21(idS + 9.0)) * (0.5 + 0.4 * g3dH21(idS + 3.0));
+              float vS = clamp(lhS / sB.y + 0.5, 0.0, 1.0);
+              outgoingLight = mix(outgoingLight, corS * cortS * mix(0.75, 1.05, vS), uNoiteG * ligaS * banda);
+            }
+          }
+          if (pA.z > 0.5 && pB.z > 0.5 && uNoiteG > 0.001) {
+            int nC = int(pA.z);
+            float c0 = texelFetch(uJanMap, ivec2(2, rowM), 0).x, cN = texelFetch(uJanMap, ivec2(2 + (nC - 1) / 4, rowM), 0)[(nC - 1) - ((nC - 1) / 4) * 4];
+            float pas = nC > 1 ? (cN - c0) / float(nC - 1) : 3.0;
+            int kE = int(clamp(floor((uT - c0) / max(pas, 0.5) + 0.5), 0.0, float(nC - 1)));
+            float cx = -1.0, cU = 0.0, dB = 1e9;
+            for (int q = -2; q <= 2; q++) { int k = kE + q; if (k < 0 || k >= nC) continue; float c = texelFetch(uJanMap, ivec2(2 + k / 4, rowM), 0)[k - (k / 4) * 4]; if (abs(uT - c) < dB) { dB = abs(uT - c); cx = float(k); cU = c; } }
+            float cy = floor((hT - pB.x) / pB.y + 0.5);
+            if (cx >= 0.0 && cy >= 0.0 && cy < pB.z && cy < 62.0) {
+              vec4 mk = texelFetch(uJanMap, ivec2(18 + int(cy), rowM), 0);
+              float canal = floor(cx / 24.0), bit = cx - canal * 24.0;
+              float v = canal < 0.5 ? mk.x : canal < 1.5 ? mk.y : canal < 2.5 ? mk.z : mk.w;
+              float tem = mod(floor(v / exp2(bit)), 2.0);
+              float lu = uT - cU, lh = hT - (pB.x + cy * pB.y), hw = 0.5 * pA.w, hh = 0.5 * pB.w;
+              vec2 aa = max(vec2(fwidth(uT), fwidth(hT)), vec2(1e-3));
+              float fora = smoothstep(-aa.x, aa.x, hw - abs(lu)) * smoothstep(-aa.y, aa.y, hh - abs(lh)); // window opening
+              float fr = 0.07; // frame width (m)
+              float vidro = smoothstep(-aa.x, aa.x, hw - fr - abs(lu)) * smoothstep(-aa.y, aa.y, hh - fr - abs(lh));
+              vec2 idJ = vec2(cx, cy) + vec2(rowM * 131, rowM * 17);
+              float hA = g3dH21(idJ), hB = g3dH21(idJ + 7.3), hC = g3dH21(idJ + 19.1);
+              float mul = step(1.25, pA.w) * (1.0 - smoothstep(0.02, 0.02 + aa.x, abs(lu - (hB - 0.5) * 0.25 * pA.w))); // a mullion on wide windows
+              float hr = uJanHora / 60.0; hr = hr < 12.0 ? hr + 24.0 : hr;
+              float occ = hr < 19.0 ? mix(0.4, 0.62, clamp((hr - 17.0) / 2.0, 0.0, 1.0)) : hr < 21.0 ? mix(0.62, 0.58, (hr - 19.0) / 2.0) : hr < 23.0 ? mix(0.58, 0.36, (hr - 21.0) / 2.0) : hr < 26.0 ? mix(0.36, 0.12, (hr - 23.0) / 3.0) : 0.12; // of the eligible cells (27/10 Meta: ~30-40 % of the real window cells at 21 h)
+              float liga = tem * step(hA, occ${typeof location !== "undefined" && /[?&]jantodas=1/.test(location.search) ? " * 0.0 + 1.0" : ""});
+              vec3 corW = hB < 0.35 ? mix(vec3(1.0, 0.58, 0.26), vec3(1.0, 0.68, 0.36), hC) : hB < 0.65 ? vec3(1.0, 0.72, 0.42) : hB < 0.82 ? mix(vec3(0.98, 0.84, 0.58), vec3(0.98, 0.9, 0.7), hC) : hB < 0.92 ? vec3(0.95, 0.9, 0.82) : mix(vec3(0.78, 0.86, 1.0), vec3(0.86, 0.92, 1.0), hC);
+              float hF = g3dH21(idJ + 3.7), forcaW = 0.4 + 0.8 * pow(hF, 1.3); forcaW *= hF > 0.95 ? 1.4 : 1.0;
+              float yv = clamp(lh / max(2.0 * hh, 1e-3) + 0.5, 0.0, 1.0); // 0 bottom .. 1 top
+              float hG = g3dH21(idJ + 11.0);
+              float grad = hG < 0.34 ? mix(1.05, 0.45, yv) : hG < 0.5 ? mix(0.5, 1.05, yv) : mix(0.88, 1.0, yv); // curtain lit from below / from above; mild ceiling light
+              float temCort = step(g3dH21(idJ + 23.0), 0.2), ladoC = g3dH21(idJ + 29.0) < 0.5 ? -1.0 : 1.0, fracC = 0.3 + 0.4 * g3dH21(idJ + 31.0);
+              float cort = temCort * smoothstep(-aa.x * 1.6, aa.x * 1.6, ladoC * lu - hw * (1.0 - 2.0 * fracC));
+              vec3 luzW = corW * forcaW * grad * (1.0 - 0.6 * mul) * mix(1.0, 0.55, cort);
+              float vidroM = smoothstep(-aa.x * 1.6, aa.x * 1.6, hw - fr - abs(lu)) * smoothstep(-aa.y * 1.6, aa.y * 1.6, hh - fr - abs(lh)); // softer edge
+              float dF = length(max(vec2(abs(lu) - hw, abs(lh) - hh), vec2(0.0))), halo = (1.0 - fora) * exp(-dF / 0.2) * step(dF, 0.6);
+              float ver = ${typeof location !== "undefined" && /[?&]jangrade=1/.test(location.search) ? "1.0" : "0.0"}; // ?jangrade=1 (tests): every grid cell outlined, green = may light, red = excluded
+              outgoingLight = mix(outgoingLight, outgoingLight * 0.7, uNoiteG * tem * (fora - vidro)); // frame: darker than the wall
+              outgoingLight = mix(outgoingLight, luzW, uNoiteG * liga * vidroM);
+              outgoingLight += uNoiteG * liga * halo * corW * forcaW * 0.12;
+              outgoingLight = mix(outgoingLight, mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), tem), ver * (fora - vidro));
+            }
+          }
+        }
+      }
+      if ((janT < 0.0 || faceMap < 0.5) && !verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
         vec2 tgv = normalize(vec2(-nB.z, nB.x) + 1e-5); float lado = floor(nB.x * 3.0) * 17.0 + floor(nB.z * 3.0) * 5.0; float alin = 1.0, temMapa = 0.0;
         if (uAngExt > 0.0) {
           vec2 ru = (vB5.xz + uAngExt) / (2.0 * uAngExt);
@@ -224,6 +325,7 @@ const PLANO_MAP_GLSL = `
   diffuseColor *= sampledDiffuseColor;
 #endif
 `;
+let NOITE_DADOS = null;
 let PLANOS_DADOS = null;
 function luzDaCidade(el) {
   const e = Number.isFinite(el) ? el : -20;
@@ -263,7 +365,39 @@ function iniciarGoogle() {
     try {
       const [{ TilesRenderer }, { GoogleCloudAuthPlugin }] = await Promise.all([import(`${CDN}index.js`), import(`${CDN}index.core-plugins.js`)]);
       const tiles = new TilesRenderer();
-      tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: chave, autoRefreshToken: true, logoUrl: LOGO, useRecommendedSettings: false }));
+      const auth = new GoogleCloudAuthPlugin({ apiToken: chave, autoRefreshToken: true, logoUrl: LOGO, useRecommendedSettings: false });
+      tiles.registerPlugin(auth);
+      let canal = null, sessaoHeroi = null;
+      try {
+        if (window.parent !== window && typeof BroadcastChannel !== "undefined" && !/[?&]gpartilha=0/.test(location.search)) canal = new BroadcastChannel("g3d-sessao");
+      } catch (e) {
+        canal = null;
+      }
+      if (canal) {
+        const veio = await new Promise((ok) => {
+          const t = setTimeout(() => ok(null), 1500);
+          canal.onmessage = (ev) => {
+            const d = ev.data;
+            if (d && d.sessao) {
+              clearTimeout(t);
+              ok(d.sessao);
+            }
+          };
+          canal.postMessage({ pede: 1 });
+        });
+        if (veio) sessaoHeroi = veio;
+        else STATUS.canal = "sem-resposta";
+        STATUS.respostas = 0;
+        canal.onmessage = (ev) => {
+          const d = ev.data;
+          if (d && d.pede) {
+            if ((auth.auth || auth).sessionToken) {
+              canal.postMessage({ sessao: (auth.auth || auth).sessionToken });
+              STATUS.respostas++;
+            } else STATUS.semToken = (STATUS.semToken || 0) + 1;
+          }
+        };
+      }
       const draco = new DRACOLoader();
       draco.setDecoderPath(DRACO);
       const gltf = new GLTFLoader(tiles.manager);
@@ -295,6 +429,8 @@ function iniciarGoogle() {
           if (s.recorte) {
             s.recorte.vizN.value = 0;
             s.recorte.perto.value = 0;
+            s.recorte.janN.value = 0;
+            s.recorte.janDetOk.value = 0;
             s.recorte.mapaR.value.w = 0;
             s.recorte.ret.value.set(1, 1, 0, 0);
           }
@@ -319,6 +455,7 @@ function iniciarGoogle() {
           s.atualizaRecorte();
         }
         tiles.errorTarget = erro * C8.erroK;
+        if (quem && quem._janPlanos) quem._janPlanos();
       };
       s.recorte = {
         liga: { value: 0 },
@@ -332,6 +469,12 @@ function iniciarGoogle() {
         noite: { value: 0 },
         frac: { value: 0.25 },
         perto: { value: 0 },
+        janB: { value: Array.from({ length: 64 }, () => new THREE.Vector4()) },
+        janN: { value: 0 },
+        janDet: { value: null },
+        janDetOk: { value: 0 },
+        janMap: { value: null },
+        janHora: { value: 1260 },
         grade: { value: new THREE.Vector4(1, 1, 1, 0.18) },
         nit: { value: C8.nitidez },
         viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) },
@@ -360,6 +503,12 @@ function iniciarGoogle() {
         sh.uniforms.uNoiteG = s.recorte.noite;
         sh.uniforms.uFracG = s.recorte.frac;
         sh.uniforms.uPertoJ = s.recorte.perto;
+        sh.uniforms.uJanB = s.recorte.janB;
+        sh.uniforms.uJanN = s.recorte.janN;
+        sh.uniforms.uJanDet = s.recorte.janDet;
+        sh.uniforms.uJanDetOk = s.recorte.janDetOk;
+        sh.uniforms.uJanMap = s.recorte.janMap;
+        sh.uniforms.uJanHora = s.recorte.janHora;
         sh.uniforms.uGrade = s.recorte.grade;
         sh.uniforms.uNitG = s.recorte.nit;
         sh.uniforms.uViz = s.recorte.viz;
@@ -373,7 +522,7 @@ function iniciarGoogle() {
         sh.uniforms.uAng = s.recorte.ang;
         sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = "uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;");
-        sh.fragmentShader = "uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\nuniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n" + GRADE_GLSL + "uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n" + FANT_GLSL + sh.fragmentShader.replace("#include <map_fragment>", NIT_GLSL).replace("#include <opaque_fragment>", LUZ_GLSL + "\n#include <opaque_fragment>").replace(
+        sh.fragmentShader = "uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\nuniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n" + GRADE_GLSL + "uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform vec4 uJanB[64];\nuniform float uJanN;\nuniform sampler2D uJanDet;\nuniform highp sampler2D uJanMap;\nuniform float uJanHora;\nuniform float uJanDetOk;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n" + FANT_GLSL + sh.fragmentShader.replace("#include <map_fragment>", NIT_GLSL).replace("#include <opaque_fragment>", LUZ_GLSL + "\n#include <opaque_fragment>").replace(
           "void main() {",
           "void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;\n#ifndef G3D_PLANO\n  if (uVizN > 0.5 && g3dNoViz(vB5)) discard;\n#endif"
         );
@@ -453,6 +602,10 @@ function iniciarGoogle() {
         s._camInicial = cam;
       });
       tiles.deleteCamera(s._camInicial);
+      if (sessaoHeroi) {
+        (auth.auth || auth).sessionToken = sessaoHeroi;
+        STATUS.sessaoPartilhada = true;
+      }
       tiles.addEventListener("load-error", (ev) => {
         STATUS.erro = String(ev.error && ev.error.message || ev.error).slice(0, 160);
       });
@@ -556,6 +709,209 @@ class VistaGoogle {
       out.push(Math.cos(phi) * Math.sin(th), Math.cos(th), Math.sin(phi) * Math.sin(th));
     }
     this.dirsV = new Float32Array(out);
+  }
+  _janPlanos() {
+    const R = this.s.recorte;
+    if (!R.janB || !R.ecefParaB5 || !this.matriz || typeof location !== "undefined" && /[?&]janplanos=0/.test(location.search)) {
+      if (R.janN) R.janN.value = 0;
+      return;
+    }
+    const chave = this.matriz.elements.map((x) => x.toFixed(2)).join(",");
+    if (this._janChave === chave) {
+      R.janN.value = this._janN || 0;
+      R.janDetOk.value = this._janDet ? 1 : 0;
+      if (this._janDet) R.janDet.value = this._janDet.tex;
+      return;
+    }
+    this._janChave = chave;
+    this._janN = 0;
+    R.janN.value = 0;
+    if (!PLANOS_DADOS) PLANOS_DADOS = fetch("assets/entorno/vizinhos-planos.json").then((r) => r.ok ? r.json() : null).catch(() => null);
+    if (!NOITE_DADOS) NOITE_DADOS = fetch("assets/entorno/janelas-noite.json", { cache: "no-cache" }).then((r) => r.ok ? r.json() : null).catch(() => null);
+    Promise.all([PLANOS_DADOS, NOITE_DADOS]).then(([D, JN]) => {
+      if (this._janChave !== chave || !D || !D.partes) return;
+      const paraB5 = new THREE.Matrix4().copy(R.ecefParaB5).multiply(this.matriz.clone().invert());
+      const olho = new THREE.Vector3(0, 0, 0).applyMatrix4(paraB5);
+      const dist = (p) => {
+        const c = Math.cos(p.a), s = Math.sin(p.a), dx = olho.x - p.c[0], dz = olho.z - p.c[1];
+        const qx = dx * c + dz * s, qz = -dx * s + dz * c;
+        return Math.hypot(Math.max(Math.abs(qx) - p.h[0], 0), Math.max(Math.abs(qz) - p.h[1], 0));
+      };
+      const sel = D.partes.filter((p) => p.fill >= 0.7 && p.y[1] - p.y[0] >= 6).map((p) => ({ p, d: dist(p) })).filter((x) => x.d < 260 && x.d > 2).sort((a, b) => a.d - b.d).slice(0, 32);
+      sel.forEach(({ p }, i) => {
+        R.janB.value[2 * i].set(p.c[0], p.c[1], p.h[0], p.h[1]);
+        R.janB.value[2 * i + 1].set(Math.cos(p.a), Math.sin(p.a), p.y[0], p.y[1]);
+      });
+      if (!R.janMap.value) {
+        const t = new THREE.DataTexture(new Float32Array(96 * 128 * 4), 96, 128, THREE.RGBAFormat, THREE.FloatType);
+        t.minFilter = t.magFilter = THREE.NearestFilter;
+        R.janMap.value = t;
+      }
+      {
+        const T = R.janMap.value, d = T.image.data, F2 = JN && JN.faces || {};
+        d.fill(0);
+        let nF = 0;
+        sel.forEach(({ p }, i) => {
+          for (let f = 0; f < 4; f++) {
+            const m = F2[`${p.id}.${p.n || 0}-f${f}`];
+            if (!m || !(m.colunas_u.length && m.linhas_h.length || m.sacada)) continue;
+            const row = i * 4 + f, k0 = row * 96 * 4, nc = Math.min(64, m.colunas_u.length);
+            nF++;
+            if (m.sacada) {
+              const q = m.sacada;
+              d.set([q.u[0], q.u[1], q.h0, q.andar], k0 + 80 * 4);
+              d.set([q.linhas, q.alt, q.unidade, 1], k0 + 81 * 4);
+            }
+            if (!nc || !m.linhas_h.length) continue;
+            d.set([0, 0, nc, m.janela.larg], k0);
+            d.set([m.linhas_h[0], m.andar, Math.min(62, m.linhas_h.length), m.janela.alt], k0 + 4);
+            d.set(m.colunas_u.slice(0, nc), k0 + 8);
+            m.mascara.slice(0, 62).forEach((lin, r) => {
+              const w = [0, 0, 0, 0];
+              for (let c = 0; c < Math.min(nc, lin.length); c++) if (lin[c] === "1") w[Math.floor(c / 24)] += 2 ** (c % 24);
+              d.set(w, k0 + (18 + r) * 4);
+            });
+          }
+        });
+        T.needsUpdate = true;
+        this._janFaces = nF;
+      }
+      this._janSel = sel.map((x) => x.p);
+      this._janDet = null;
+      this._janN = sel.length;
+      if (this.s.dono === this) R.janN.value = sel.length;
+      if (typeof window !== "undefined") window.__g3dJanPlanos = { olho: olho.toArray().map((x) => +x.toFixed(1)), n: sel.length, ids: sel.map((x) => x.p.id + ":" + x.d.toFixed(0)) };
+      this.acordar();
+    });
+  }
+  _janDetecta() {
+    const R = this.s.recorte, S = this._janSel;
+    if (!S || !R.ecefParaB5 || !this.rt) return;
+    const W = Math.min(1600, this.larg), H = Math.max(2, Math.round(W * this.alt / this.larg));
+    if (!this._detRT || this._detRT.width !== W || this._detRT.height !== H) {
+      if (this._detRT) this._detRT.dispose();
+      this._detRT = new THREE.WebGLRenderTarget(W, H, { type: THREE.UnsignedByteType, depthBuffer: true, generateMipmaps: false });
+    }
+    const r = this.r, ant = r.getRenderTarget(), cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
+    const luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
+    R.luz.value.set(1, 1, 1);
+    R.noite.value = 0;
+    R.grade.value.set(1, 1, 1, 0.18);
+    r.setRenderTarget(this._detRT);
+    r.setClearColor(0, 0);
+    r.clear();
+    r.render(this.s.escena, this.cam);
+    const px = new Uint8Array(W * H * 4);
+    r.readRenderTargetPixels(this._detRT, 0, 0, W, H, px);
+    R.luz.value.copy(luz0);
+    R.noite.value = noite0;
+    R.grade.value.copy(grade0);
+    r.setRenderTarget(ant);
+    r.setClearColor(cc, ca);
+    if (!this._janDet) {
+      const d = new Uint8Array(128 * 4096 * 4);
+      const tex = new THREE.DataTexture(d, 128, 4096, THREE.RGBAFormat, THREE.UnsignedByteType);
+      tex.minFilter = tex.magFilter = THREE.NearestFilter;
+      this._janDet = { d, tex, n: 0 };
+    }
+    const D = this._janDet.d, ML = this._planosParaL(), cam = this.cam, v = new THREE.Vector3();
+    cam.updateMatrixWorld(true);
+    const lum = (u, h, f) => {
+      v.copy(f(u, h)).applyMatrix4(ML).project(cam);
+      if (v.z > 1 || Math.abs(v.x) > 1 || Math.abs(v.y) > 1) return -1;
+      const x = Math.min(W - 1, Math.max(0, Math.round((v.x * 0.5 + 0.5) * (W - 1)))), y = Math.min(H - 1, Math.max(0, Math.round((v.y * 0.5 + 0.5) * (H - 1)))), k = (y * W + x) * 4;
+      if (px[k + 3] < 200) return -1;
+      return (0.2126 * px[k] + 0.7152 * px[k + 1] + 0.0722 * px[k + 2]) / 255;
+    };
+    let novos = 0;
+    S.forEach((p, i) => {
+      const c = Math.cos(p.a), s = Math.sin(p.a);
+      for (let face = 0; face < 4; face++) {
+        const fx = face < 2, sg = face % 2 === 0 ? 1 : -1, off = fx ? p.h[0] : p.h[1], ao = fx ? p.h[1] : p.h[0];
+        const f = (u, h) => {
+          const qx = fx ? sg * off : u, qy = fx ? u : sg * off;
+          return new THREE.Vector3(p.c[0] + qx * c - qy * s, h, p.c[1] + qx * s + qy * c);
+        };
+        const nb = Math.max(1, Math.floor(2 * ao / 3.1)), bay = 2 * ao / nb, nf = Math.min(32, Math.floor((p.y[1] - p.y[0]) / 2.85));
+        for (let cx = 1; cx < Math.min(nb - 1, 128); cx++) for (let cy = 1; cy < nf; cy++) {
+          const row = (i * 4 + face) * 32 + cy, k0 = (row * 128 + cx) * 4;
+          if (D[k0 + 3] > 0) continue;
+          const uS = -ao + cx * bay, hb = p.y[0] + cy * 2.85;
+          if (hb + 2.85 > p.y[1] - 1) continue;
+          const G = [];
+          let lmax = 0, lmin = 9, gmin = -1, fora = false;
+          for (let a = 0; a < 8 && !fora; a++) for (let k = 0; k < 12; k++) {
+            const x = lum(uS + bay * (k + 0.5) / 12, hb + 2.85 * (a + 0.5) / 8, f);
+            if (x < 0) {
+              fora = true;
+              break;
+            }
+            G.push(x);
+            if (x > lmax) lmax = x;
+            if (x < lmin) {
+              lmin = x;
+              gmin = G.length - 1;
+            }
+          }
+          if (fora) continue;
+          const ord = [...G].sort((a2, b2) => a2 - b2), lpar = ord[Math.floor(ord.length * 0.75)], nesc = G.filter((x) => x < 0.6 * lpar).length;
+          const ka = gmin % 12, aa = Math.floor(gmin / 12);
+          let sw = 0, su = 0, sh = 0;
+          G.forEach((x, n) => {
+            const k = n % 12, a = Math.floor(n / 12);
+            if (Math.abs(k - ka) <= 2 && Math.abs(a - aa) <= 2) {
+              const w = Math.max(0, 0.6 * lpar - x);
+              sw += w;
+              su += w * (k + 0.5) / 12;
+              sh += w * (a + 0.5) / 8;
+            }
+          });
+          const ucr = sw > 0 ? su / sw : (ka + 0.5) / 12, uc = uS + ucr * bay, hc = hb + 2.85 * (sw > 0 ? sh / sw : (aa + 0.5) / 8);
+          const lC = lum(uc, hc, f), lE = lum(uc - 0.9, hc, f), lD = lum(uc + 0.9, hc, f), lAc = lum(uc, hc + 1, f), lAb = lum(uc, hc - 1, f);
+          const ok = lpar > 0.04 && lC >= 0 && lC < 0.6 * lpar && nesc <= 30 && Math.min(lE, lD) > 1.5 * lC && Math.min(lAc, lAb) > 1.5 * lC && hc > hb + 0.6 && hc < hb + 2.4;
+          let wl = 0, wr = 0, ht = 0, hd = 0;
+          const lim = 0.72 * lpar;
+          if (ok) {
+            for (let d = 0.1; d <= 1.2; d += 0.1) {
+              const x = lum(uc - d, hc, f);
+              if (x < 0 || x > lim) break;
+              wl = d;
+            }
+            for (let d = 0.1; d <= 1.2; d += 0.1) {
+              const x = lum(uc + d, hc, f);
+              if (x < 0 || x > lim) break;
+              wr = d;
+            }
+            for (let d = 0.1; d <= 1.2; d += 0.1) {
+              const x = lum((uc - wl + uc + wr) / 2, hc + d, f);
+              if (x < 0 || x > lim) break;
+              ht = d;
+            }
+            for (let d = 0.1; d <= 1.2; d += 0.1) {
+              const x = lum((uc - wl + uc + wr) / 2, hc - d, f);
+              if (x < 0 || x > lim) break;
+              hd = d;
+            }
+          }
+          const ucm = (uc - wl + uc + wr) / 2, hcm = (hc + ht + hc - hd) / 2, larg = wl + wr + 0.1, alt = ht + hd + 0.1;
+          if (ok) {
+            const st = window.__g3dJanMed || (window.__g3dJanMed = []);
+            if (st.length < 2e3) st.push([+larg.toFixed(1), +alt.toFixed(1)]);
+          }
+          D[k0] = ok ? Math.max(1, Math.round(larg / 3 * 255)) : 0;
+          D[k0 + 1] = Math.round(Math.min(1, Math.max(0, (ucm - uS) / bay)) * 255);
+          D[k0 + 2] = Math.round(Math.min(1, (hcm - hb) / 2.85) * 255);
+          D[k0 + 3] = ok ? Math.max(2, Math.round(alt / 3 * 255)) : 1;
+          novos++;
+        }
+      }
+    });
+    this._janDet.n += novos;
+    this._janDet.tex.needsUpdate = true;
+    R.janDet.value = this._janDet.tex;
+    R.janDetOk.value = 1;
+    if (typeof window !== "undefined") window.__g3dJanDet = { celulas: this._janDet.n, achadas: [...D].filter((x, k) => k % 4 === 0 && x > 0).length };
+    this.acordar();
   }
   vidroNaTela(camera) {
     return this.dirsV ? this.janelaNaTela(camera, this.dirsV) : { x0: -1, y0: -1, x1: 1, y1: 1 };
@@ -667,7 +1023,13 @@ class VistaGoogle {
     if (assa) this._planosDepois();
     const st = this.s.tiles.stats;
     STATUS.tiles = st ? st.visible || 0 : 0;
-    if (st && (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1)) this.acordar();
+    if (st && (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1)) {
+      this.acordar();
+      this._detQ = 0;
+    } else if (this._janSel && this._janSel.length) {
+      this._detQ = (this._detQ || 0) + 1;
+      if (this._detQ === 20 && /[?&]janret=1/.test(location.search)) this._janDetecta();
+    }
     this.atualizaCredito();
   }
   facesDaJanela() {

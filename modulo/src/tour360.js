@@ -743,6 +743,7 @@ async function criar({
         ativoEm: (id) => !falhou && !(VG && VG.cobre(id)) && !!(PTS[id].camadas && PTS[id].camadas.fora) && !!geoDoPonto(id), // E0: no Google tiles where the generated view is
         aposPintar(id, e) {
           if (!this.ativoEm(id)) return;
+          if (vista.s && vista.s.recorte && vista.s.recorte.janHora) vista.s.recorte.janHora.value = estado.minutos;
           if (atual2 !== null && atual2 !== id && !gm.MODO_FOTO) {
             if (vista.recomeca) vista.recomeca();
             else {
@@ -1063,9 +1064,9 @@ async function criar({
   if (G) G.aposPintar(estado.ponto, esfera(estado.ponto));
   montaHot();
   desenha();
-  await pGoogle;
-  if (fechado) return alca;
-  raiz.dataset.ready = "1";
+  pGoogle.then(() => {
+    if (!fechado) raiz.dataset.ready = "1";
+  });
   if (/[?&]debug360=1/.test(location.search)) {
     const d = document.createElement("pre");
     d.style.cssText = "position:absolute;left:8px;top:240px;z-index:50;margin:0;padding:6px 8px;font:11px/1.35 monospace;background:rgba(0,0,0,.75);color:#fff;border-radius:6px;pointer-events:none;white-space:pre-wrap;max-width:80%";

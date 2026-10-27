@@ -896,7 +896,7 @@ function preencherBarraInterior(u) {
     )
   ));
 }
-async function entrarApartamento(id, { semAnimacao = false } = {}) {
+async function entrarApartamento(id, { semAnimacao = false, ponto = null } = {}) {
   if (!b7Ativo("interiorProcedural") && !await manifestoTour360().catch(() => null)) {
     abrirPasseioReal();
     return;
@@ -926,7 +926,8 @@ async function entrarApartamento(id, { semAnimacao = false } = {}) {
         if (minutos != null) S.rel.hora(minutos);
       },
       aoFechar: () => pedirSaida("modulo"),
-      ...inicioUsado ? {} : { ponto: INICIO_TOUR.ponto, luzes: INICIO_TOUR.luzes || void 0, reflexo: INICIO_TOUR.reflexo }
+      ...inicioUsado ? {} : { ponto: INICIO_TOUR.ponto, luzes: INICIO_TOUR.luzes || void 0, reflexo: INICIO_TOUR.reflexo },
+      ...ponto ? { ponto } : {}
     });
     inicioUsado = true;
     {
@@ -1484,7 +1485,7 @@ if (window.parent !== window) {
         const tipo = c.classList.contains("t360-vg-credito") ? "vista-gerada" : c.classList.contains("t360-g3d") ? "janela" : "cidade";
         const at = c.querySelector(".g3d-attr");
         const dados = tipo === "vista-gerada" ? c.textContent : (at ? at.textContent : "").replace(/^Dados do mapa: /, "");
-        return { tipo, dados, visivel: !c.hidden && c.isConnected };
+        return { tipo, dados, visivel: !c.hidden && c.isConnected && !(tipo === "cidade" && interiorAberto) };
       });
       const sig = JSON.stringify(lista);
       if (sig === credSig) return;
@@ -1658,7 +1659,7 @@ if (window.parent !== window) {
   });
   const doisQ = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   const espera = (ms) => new Promise((r) => setTimeout(r, ms));
-  let inicioCam = null, inicioPainel = null, passoSig = "", navegando = false;
+  let inicioCam = null, inicioPainel = null, passoSig = "", navegando = false, heroiSol = null;
   const passoAtual = () => {
     if (interiorAberto && app.interior) {
       const e = app.interior.api && app.interior.api.estado ? app.interior.api.estado() : null;
@@ -1708,8 +1709,12 @@ if (window.parent !== window) {
         posta({ erro: { id: d.id, motivo: "unidade-invalida" } });
         return;
       }
-      const t0 = performance.now();
+      const t0 = performance.now(), navT = app.__navT = [["inicio", 0]], marca = (k) => navT.push([k, Math.round(performance.now() - t0)]);
       while (document.documentElement.dataset.estado !== "pronto" && performance.now() - t0 < 3e4) await espera(100);
+      if (nome !== "fora" && !heroiSol && !interiorAberto) {
+        const S = await carregarSol(), i = S.rel.info();
+        heroiSol = { t: i.t, est: i.est };
+      }
       for (const s of ["#galeria", "#legal", "#int-detalhes"]) {
         const e = $(s);
         if (e) e.hidden = true;
@@ -1735,6 +1740,12 @@ if (window.parent !== window) {
         }
         await doisQ();
         await camParada(5e3);
+        if (heroiSol) {
+          const S = await carregarSol();
+          if (S.rel.info().est !== heroiSol.est) S.rel.estacao(heroiSol.est);
+          S.rel.hora(heroiSol.t);
+          heroiSol = null;
+        }
       } else if (nome === "cartao") {
         if ($("#card").hidden || app.unidade !== u.id) abrirUnidade(u.id);
         await doisQ();
@@ -1742,19 +1753,23 @@ if (window.parent !== window) {
       } else {
         if (!interiorAberto) {
           if ($("#card").hidden || app.unidade !== u.id) abrirUnidade(u.id);
-          await entrarApartamento(u.id, { semAnimacao: true });
+          marca("entrar");
+          await entrarApartamento(u.id, { semAnimacao: true, ponto: alvo.ponto || null });
+          marca("aberto");
         }
         let a = null;
         const t1 = performance.now();
         while (performance.now() - t1 < 3e4 && !(a = app.interior && app.interior.api && app.interior.api.estado ? app.interior.api : null)) await espera(100);
         if (!a) throw new Error("tour-nao-abriu");
         if (alvo.ponto && a.estado().ponto !== alvo.ponto) await a.irPara(alvo.ponto, { dur: 1 });
+        marca("ponto");
         const t2 = performance.now();
+        const mostrado = (e) => !e.andando && (e.emDia || !!(e.pintado && e.pintado.minutos === e.minutos && e.pintado.estacao === e.estacao));
         while (performance.now() - t2 < 2e4) {
-          const e = a.estado();
-          if (e.emDia && !e.andando) break;
-          await espera(100);
+          if (mostrado(a.estado())) break;
+          await espera(50);
         }
+        marca("mostrado");
         if (alvo.ponto && a.estado().ponto !== alvo.ponto) {
           passoSig = sigDe(passoAtual());
           posta({ erro: { id: d.id, motivo: "ponto-invalido" } });
@@ -1762,9 +1777,15 @@ if (window.parent !== window) {
         }
       }
       await doisQ();
+      marca("fim");
       const p = passoAtual();
       passoSig = sigDe(p);
-      posta(nome === "fora" ? { id: d.id, estado: "inicio", passo: soPasso(p) } : { id: d.id, passo: soPasso(p), restaurado: true });
+      let fora = null;
+      if (nome === "fora") {
+        const i = (await carregarSol()).rel.info();
+        fora = { minutos: Math.round(i.t), estacao: i.est };
+      }
+      posta(nome === "fora" ? { id: d.id, estado: "inicio", passo: soPasso(p), fora } : { id: d.id, passo: soPasso(p), restaurado: true });
     } catch (er) {
       posta({ erro: { id: d.id, motivo: String(er && er.message || er).slice(0, 120) } });
     } finally {
