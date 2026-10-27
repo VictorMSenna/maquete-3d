@@ -744,9 +744,12 @@ async function criar({
         aposPintar(id, e) {
           if (!this.ativoEm(id)) return;
           if (atual2 !== null && atual2 !== id && !gm.MODO_FOTO) {
-            vista.pronto = false;
-            vista._lote = null;
-            vista._quieto = 0;
+            if (vista.recomeca) vista.recomeca();
+            else {
+              vista.pronto = false;
+              vista._lote = null;
+              vista._quieto = 0;
+            }
           }
           const g0 = geoDoPonto(id);
           const g = g0.porUnidade ? g0 : { ...g0, h: g0.h + (andar != null && g0.andar_ref != null ? (andar - g0.andar_ref) * (g0.por_andar || 2.81) : 0) };
@@ -1054,11 +1057,13 @@ async function criar({
   VEU.fora.value = /[?&]google3d=0/.test(location.search) ? 0 : 1;
   VG = /[?&]vistagerada=0/.test(location.search) ? null : await criarVistaGerada({ cena, PTS, andar, final, RAIO });
   if (VG) raiz.appendChild(VG.credito);
+  const pGoogle = ligaGoogle();
   await repinta();
   if (fechado) return alca;
+  if (G) G.aposPintar(estado.ponto, esfera(estado.ponto));
   montaHot();
   desenha();
-  await ligaGoogle();
+  await pGoogle;
   if (fechado) return alca;
   raiz.dataset.ready = "1";
   if (/[?&]debug360=1/.test(location.search)) {

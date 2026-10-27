@@ -37,6 +37,7 @@ const FOTO_MB = (+(typeof location !== "undefined" && new URLSearchParams(locati
 const FOTO_N = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfn")) || (capacidade().nivel === "topo" ? 4 : 2);
 const RAPIDO = !(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfr") === "0");
 const ERRO_RAPIDO = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gferr2")) || ERRO_FOTO * 3;
+const FASE1_K = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("g1k")) || 3;
 const desligadoPorUrl = () => /[?&]google3d=0/.test(location.search);
 async function chaveDaPagina() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
@@ -151,7 +152,7 @@ const LUZ_GLSL = `
         jan *= 1.0 - smoothstep(0.08, 0.16, abs(nB.y));
         jan *= 1.0 - smoothstep(0.05, 0.15, length(fwidth(nB)));
         float dCamJ = length(camJ - vB5);
-        jan *= uPertoJ > 0.5 ? smoothstep(45.0, 90.0, dCamJ) : smoothstep(${typeof location !== "undefined" && /[?&]janperto=\d+,\d+/.test(location.search) ? location.search.match(/[?&]janperto=(\d+),(\d+)/).slice(1, 3).map((x) => x + ".0").join(", ") : "150.0, 190.0"}, dCamJ);${typeof location !== "undefined" && /[?&]jandist=1/.test(location.search) ? " { float dJ = length(camJ - vB5); outgoingLight = cB * 0.35 + jan * (dJ < 40.0 ? vec3(1.0, 0.0, 0.0) : dJ < 60.0 ? vec3(1.0, 0.5, 0.0) : dJ < 80.0 ? vec3(1.0, 1.0, 0.0) : dJ < 110.0 ? vec3(0.0, 1.0, 0.0) : dJ < 150.0 ? vec3(0.0, 1.0, 1.0) : vec3(0.3, 0.3, 1.0)); cB = vec3(0.0); jan = 0.0; }" : ""}
+        jan *= uPertoJ > 0.5 ? smoothstep(45.0, 90.0, dCamJ) : smoothstep(${typeof location !== "undefined" && /[?&]janperto=\d+,\d+/.test(location.search) ? location.search.match(/[?&]janperto=(\d+),(\d+)/).slice(1, 3).map((x) => x + ".0").join(", ") : "150.0, 190.0"}, dCamJ); // ?janperto=A,B (tests): other fade distances in metres${typeof location !== "undefined" && /[?&]jandist=1/.test(location.search) ? " { float dJ = length(camJ - vB5); outgoingLight = cB * 0.35 + jan * (dJ < 40.0 ? vec3(1.0, 0.0, 0.0) : dJ < 60.0 ? vec3(1.0, 0.5, 0.0) : dJ < 80.0 ? vec3(1.0, 1.0, 0.0) : dJ < 110.0 ? vec3(0.0, 1.0, 0.0) : dJ < 150.0 ? vec3(0.0, 1.0, 1.0) : vec3(0.3, 0.3, 1.0)); cB = vec3(0.0); jan = 0.0; }" : ""} // ?jandist=1 (tests): every window cell that passes the gates, coloured by distance to the camera: red < 40 m, orange < 60, yellow < 80, green < 110, cyan < 150, blue beyond
         float acesa = step(id, uFracG) * jan;
         float lum = dot(cB, vec3(0.2126, 0.7152, 0.0722));
         float vidro = 1.0 - smoothstep(0.18, 0.5, lum);
@@ -305,6 +306,7 @@ function iniciarGoogle() {
             pai.add(g2);
           }
           s.dono = quem;
+          if (s.ritmoFora) s.ritmoFora();
         }
         const g = tiles.group;
         g.matrixAutoUpdate = false;
@@ -520,8 +522,11 @@ class VistaGoogle {
     this.resW = w;
     this.resH = h;
   }
+  static desenhavel(img) {
+    return !!img && (typeof HTMLImageElement !== "undefined" && img instanceof HTMLImageElement && img.naturalWidth > 0 || typeof HTMLCanvasElement !== "undefined" && img instanceof HTMLCanvasElement || typeof ImageBitmap !== "undefined" && img instanceof ImageBitmap || typeof OffscreenCanvas !== "undefined" && img instanceof OffscreenCanvas);
+  }
   definirMascara(img) {
-    if (!img || img === this.mascaraFonte) return;
+    if (!VistaGoogle.desenhavel(img) || img === this.mascaraFonte) return;
     this.mascaraFonte = img;
     const W = 256, H = 128, c = document.createElement("canvas");
     c.width = W;
@@ -537,7 +542,7 @@ class VistaGoogle {
     this.dirs = new Float32Array(out);
   }
   definirVidro(img) {
-    if (!img || img === this.vidroFonte) return;
+    if (!VistaGoogle.desenhavel(img) || img === this.vidroFonte) return;
     this.vidroFonte = img;
     const W = 256, H = 128, c = document.createElement("canvas");
     c.width = W;
@@ -604,7 +609,7 @@ class VistaGoogle {
     cs.updateProjectionMatrix();
     cs.updateMatrixWorld(true);
     this.janela = { px, py, pw, ph };
-    this.s.tomar(this, this.s.escena, this.matriz, cs, ERRO_360);
+    this.s.tomar(this, this.s.escena, this.matriz, cs, this._fase1 !== false && FASE1_K > 1 ? ERRO_360 * FASE1_K : ERRO_360);
     this.s.tiles.setResolution(cs, pw, ph);
     const T = this.s.tiles;
     if (dirV && !soCarregar) {
@@ -639,6 +644,7 @@ class VistaGoogle {
     this._planosAplica();
     this.s.escena.updateMatrixWorld(true);
     this.s.tiles.update();
+    this._faseAtualiza();
     if (soCarregar) {
       const st2 = this.s.tiles.stats;
       if (st2.queued + st2.downloading + st2.parsing > 0 || this.s.tiles.loadProgress < 1) this.acordar();
@@ -1264,17 +1270,96 @@ class VistaGoogle {
   progressoFoto(ver) {
     const el = this.carga, F2 = this.foto;
     if (!el || !F2) return;
+    if (F2.chave !== this._pFchave) {
+      this._pFchave = F2.chave;
+      this._pF = 0;
+      this._pFfim = false;
+    }
+    this._pF = Math.max(this._pF || 0, F2.feito ? 1 : F2.prog);
+    if (F2.feito && !F2.fundo && !this._pFfim && !el.hidden) {
+      this._pFfim = true;
+      el.querySelector("b").style.width = "100%";
+      setTimeout(() => {
+        el.hidden = true;
+      }, 900);
+      return;
+    }
+    if (this._pFfim) return;
     const mostra = ver && !F2.feito && !F2.fundo;
     if (el.hidden === mostra) el.hidden = !mostra;
-    if (mostra) el.querySelector("b").style.width = Math.round(4 + 96 * F2.prog) + "%";
+    if (mostra) el.querySelector("b").style.width = Math.round(4 + 96 * this._pF) + "%";
   }
   opacidade() {
     return this.pronto ? Math.min(1, (performance.now() - this.tPronto) / 800) : 0;
+  }
+  recomeca() {
+    this.pronto = false;
+    this._lote = null;
+    this._quieto = 0;
+    this._fase1 = true;
+    this._t1 = null;
+    this._q1 = 0;
+    this._fim = false;
+    if (this._some) {
+      clearTimeout(this._some);
+      this._some = 0;
+    }
+  }
+  _faseAtualiza() {
+    if (FASE1_K <= 1) return;
+    const t = this.s.tiles, st = t.stats, pend = st.queued + st.downloading + st.parsing, agora = performance.now();
+    if (this._t1 == null) this._t1 = agora;
+    this._q1 = pend === 0 ? (this._q1 || 0) + 1 : 0;
+    if (this._fase1 === false) return;
+    const quieto = this._q1 >= 15 && (t.loadProgress === void 0 || t.loadProgress >= 1 || this._q1 >= 30);
+    if (st.visible > 0 && quieto || t.lruCache.isFull() || agora - this._t1 > 8e3 && st.visible >= 30) {
+      this._fase1 = false;
+      this._q1 = 0;
+      this._fase1ms = Math.round(agora - this._t1);
+      if (!this.pronto) {
+        this.pronto = true;
+        this.tPronto = agora;
+      }
+      this.acordar();
+    }
   }
   progresso(janelaNaTela) {
     const st = this.s.tiles.stats, pend = st.queued + st.downloading + st.parsing, el = this.carga;
     if (!el) return;
     const barra = el.querySelector("b");
+    if (FASE1_K > 1) {
+      if (this._fim) return;
+      if (!this.pronto && st.visible >= 100) {
+        this.pronto = true;
+        this.tPronto = performance.now();
+      }
+      if (!this._lote) this._lote = { base: st.loaded, p: 0, b2: null };
+      const Lt = this._lote;
+      let f;
+      if (this._fase1 !== false) {
+        const fe = Math.max(0, st.loaded - Lt.base);
+        f = pend > 0 ? 0.6 * fe / (fe + pend) : Lt.p;
+      } else {
+        if (Lt.b2 == null) Lt.b2 = st.loaded;
+        const fe = Math.max(0, st.loaded - Lt.b2);
+        f = 0.6 + 0.4 * (pend > 0 ? fe / (fe + pend) : 1);
+      }
+      Lt.p = Math.max(Lt.p, Math.min(f, this._fase1 !== false ? 0.6 : 0.99));
+      const ver2 = !!janelaNaTela;
+      if (this._fase1 === false && this._q1 >= 15 && (this.s.tiles.loadProgress === void 0 || this.s.tiles.loadProgress >= 1 || this._q1 >= 30)) {
+        this._fim = true;
+        barra.style.width = "100%";
+        if (ver2) el.hidden = false;
+        this._some = setTimeout(() => {
+          el.hidden = true;
+          this._some = 0;
+        }, 900);
+        return;
+      }
+      if (el.hidden === ver2) el.hidden = !ver2;
+      if (ver2) barra.style.width = Math.round(4 + 96 * Lt.p) + "%";
+      return;
+    }
     if (pend > 0) {
       if (!this._lote) this._lote = { base: st.loaded, p: 0 };
       const feitos = Math.max(0, st.loaded - this._lote.base);
@@ -1649,18 +1734,36 @@ async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, esconder
     const st = tiles.stats;
     return st.queued + st.downloading + st.parsing > 0 || tiles.loadProgress < 1;
   };
+  let foraDaTela = false;
+  const fila = tiles.downloadQueue, campoFila = fila && ("maxJobsPerOrigin" in fila ? "maxJobsPerOrigin" : "maxJobs"), filaMax = fila ? fila[campoFila] : 30;
+  s.ritmoFora = () => {
+    if (!fila) return;
+    const lento = foraDaTela && mostrando && (!s.dono || s.dono === api);
+    const v = lento ? 2 : filaMax;
+    if (fila[campoFila] !== v) fila[campoFila] = v;
+  };
   const bombear = () => {
     quieto = 0;
     if (laco || falhou) return;
     const passo = () => {
       laco = 0;
       if (falhou) return;
+      if (foraDaTela && mostrando && (!s.dono || s.dono === api)) return;
       aoMudar && aoMudar();
       quieto = pendente() ? 0 : quieto + 1;
       if (quieto < 30 && !laco) laco = requestAnimationFrame(passo);
     };
     laco = requestAnimationFrame(passo);
   };
+  if (typeof window !== "undefined" && window.parent !== window && typeof IntersectionObserver !== "undefined" && !/[?&]gpausa=0/.test(location.search)) {
+    new IntersectionObserver((ents) => {
+      const fora = !ents.some((x) => x.isIntersecting);
+      if (fora === foraDaTela) return;
+      foraDaTela = fora;
+      s.ritmoFora();
+      if (!fora) bombear();
+    }).observe(document.documentElement);
+  }
   const api = {
     tiles,
     perf: { n: 0, ms: 0 },
@@ -1713,6 +1816,7 @@ async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, esconder
             mostrando = true;
             carga.remove();
             cred.hidden = !!api.noite;
+            s.ritmoFora();
           }
         }
         if (refino) {

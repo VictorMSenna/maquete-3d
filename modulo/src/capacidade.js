@@ -4,6 +4,7 @@ if (typeof localStorage !== "undefined") {
   migraChave(localStorage, "tabela3d-foto-ativa");
 }
 let cache = null;
+const chaveVivo = () => chaveLocal("tabela3d-vivo") + (typeof window !== "undefined" && window.parent !== window ? "|" + location.search : "");
 function rebaixar() {
   const ordem = ["leve", "medio-", "medio", "ios", "topo"], atual = capacidade().nivel, i = ordem.indexOf(atual);
   if (i <= 0) return false;
@@ -19,13 +20,13 @@ function vigiaQueda() {
   vigiaQueda.ok = true;
   const marca = () => {
     try {
-      if (document.visibilityState === "visible") sessionStorage.setItem(chaveLocal("tabela3d-vivo"), String(Date.now()));
+      if (document.visibilityState === "visible") sessionStorage.setItem(chaveVivo(), String(Date.now()));
     } catch (e) {
     }
   };
   const tira = () => {
     try {
-      sessionStorage.removeItem(chaveLocal("tabela3d-vivo"));
+      sessionStorage.removeItem(chaveVivo());
     } catch (e) {
     }
   };
@@ -44,7 +45,7 @@ function capacidade() {
   } catch (e) {
   }
   try {
-    const t = +sessionStorage.getItem(chaveLocal("tabela3d-vivo"));
+    const t = +sessionStorage.getItem(chaveVivo());
     if (t && Date.now() - t < 9e4) caiu = true;
   } catch (e) {
   }
@@ -90,7 +91,7 @@ function capacidade() {
   cache = { nivel, movel, mem, gpu, maxTex, ...T, rebaixar };
   if (caiu && nivel !== "leve" && !q) {
     try {
-      sessionStorage.removeItem(chaveLocal("tabela3d-vivo"));
+      sessionStorage.removeItem(chaveVivo());
     } catch (e) {
     }
     if (typeof window !== "undefined") window.__capacidade = cache;
