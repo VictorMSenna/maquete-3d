@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { PREDIO_CFG } from "./predio.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { posicaoSolar, fatorLuzesNoite, calorSol, corCeu, smooth, fatorDia, forcaSolDireto } from "./luz-curva.js";
 import { SOL } from "./dados-sol.js";
 import { b7Ativo } from "./entorno-config.js";
@@ -498,7 +499,7 @@ function carregarGlb(nome, ms = 3e4) {
       via = "glb";
       if (new DataView(buf).getUint32(0, true) !== 1179937895) throw new Error(nome + ": nao e glb");
     }
-    const gltf = await new Promise((ok, erro) => new GLTFLoader().parse(buf, "", ok, erro));
+    const gltf = await new Promise((ok, erro) => new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parse(buf, "", ok, erro));
     gltf.scene.updateMatrixWorld(true);
     return { cena: gltf.scene, via, bytes: buf.byteLength };
   })(), ms, nome));

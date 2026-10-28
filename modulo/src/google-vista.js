@@ -417,12 +417,25 @@ function iniciarGoogle() {
       const escena = new THREE.Scene();
       escena.add(tiles.group);
       const s = { tiles, escena, TilesRenderer, dono: null, cor: [1, 1, 1] };
+      s.vis = { fora: false, visto360: false };
+      s.pausa360 = () => s.vis.fora && s.vis.visto360 && !!s.dono && !!s.dono.ehJanela;
+      if (typeof window !== "undefined" && window.parent !== window && typeof IntersectionObserver !== "undefined" && !/[?&]gpausa=0/.test(location.search)) {
+        new IntersectionObserver((ents) => {
+          const fora = !ents.some((x) => x.isIntersecting);
+          s.vis.fora = fora;
+          if (!fora && s.dono && s.dono.ehJanela) s.vis.visto360 = true;
+          if (s.ritmoFora) s.ritmoFora();
+          else if (tiles.downloadQueue) tiles.downloadQueue.maxJobsPerOrigin = s.pausa360() ? 0 : 30;
+          if (!fora && s.dono && s.dono.acordar) s.dono.acordar();
+        }).observe(document.documentElement);
+      }
       const atualizaBase = Object.getPrototypeOf(TilesRenderer.prototype).update;
       s.esvaziar = () => {
         if (typeof atualizaBase === "function") atualizaBase.call(tiles);
         else tiles.update();
       };
       s.tomar = (quem, pai, matriz, cam, erro) => {
+        if (quem && quem.ehJanela && !s.vis.fora) s.vis.visto360 = true;
         if (s.dono !== quem) {
           if (s.dono && s.dono.restauraCache) s.dono.restauraCache();
           s._recFeito = false;
@@ -641,6 +654,7 @@ class VistaGoogle {
     this._aoCarregar = () => this.acordar();
     for (const ev of ["load-model", "tiles-load-end", "needs-update", "tile-visibility-change"]) s.tiles.addEventListener(ev, this._aoCarregar);
     this.credito = this.montaCredito();
+    this.ehJanela = true;
   }
   ligaNaCena() {
     const { lat, lon, h, ajuste } = this.ref;
@@ -1757,6 +1771,7 @@ class VistaGoogle {
     const passo = () => {
       this._laco = 0;
       if (!this.ativo) return;
+      if (this.s.pausa360 && this.s.pausa360()) return;
       const t = this.s.tiles, st = t.stats || {};
       const ocupado = (st.queued || 0) + (st.downloading || 0) + (st.parsing || 0) > 0 || t.loadProgress !== void 0 && t.loadProgress < 1;
       this.aoMudar();
@@ -2101,7 +2116,7 @@ async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, esconder
   s.ritmoFora = () => {
     if (!fila) return;
     const lento = foraDaTela && mostrando && (!s.dono || s.dono === api);
-    const v = lento ? 2 : filaMax;
+    const v = s.pausa360 && s.pausa360() ? 0 : lento ? 2 : filaMax;
     if (fila[campoFila] !== v) fila[campoFila] = v;
   };
   const bombear = () => {
