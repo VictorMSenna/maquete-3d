@@ -1000,6 +1000,7 @@ async function criar({
       return repinta();
     },
     irPara: irPara2,
+    preverDia: () => esfera(estado.ponto).mix.preverDia(estado.estacao),   // SITES-054b
     olhar: (y, p = 0, f = fov) => {
       yaw = y;
       pitch = p;

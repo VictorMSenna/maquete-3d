@@ -3,6 +3,7 @@ import { solNoInstante, mesmaFace, chaveUnidade } from "./interior-sol.js";
 import { capacidade } from "./capacidade.js";
 const ROTULO = "Imagem ilustrativa fiel ao apartamento — render a partir de fotos e medidas";
 const LUX_W = 683, EFICACIA_SOL = 105;
+const DIA_PREVER = [9 * 60, 12 * 60];   // SITES-054b: solind hours decoded ahead at night (b2 drag 21:00 -> 11:00 needs 1100 + 1200)
 function dniLux(el) {
   if (el <= 0.5) return 0;
   const am = 1 / Math.max(Math.sin(el * Math.PI / 180), 0.02);
@@ -648,11 +649,26 @@ void main(){
       }
     }
     if (el < 10) {
-      for (const k of this.luzesNoite || []) if (C[k] && C[k].arq) {
-        this.textura(C[k].arq, false, !!C[k].joelho);
-        if (C[k].lo && this.comLo) this.textura(C[k].lo, false, true);
+      // SITES-054b (02/11): at night the lamp layers the frame needs first, then the season's DAY layers (a drag back into the day must
+      // not wait on the network: b2 opens at 21:00 now), and only then the refinement 'lo' layers (the 21:00 frame does not need them)
+      for (const k of this.luzesNoite || []) if (C[k] && C[k].arq) this.textura(C[k].arq, false, !!C[k].joelho);
+      if (!this._diaP || this._diaEst !== est) {   // the 'lo' layers are REQUESTED only after the day layers are decoded (no shared bandwidth)
+        this._diaEst = est; this._diaOk = false;
+        this._diaP = this.preverDia(est).then(() => { if (this._diaEst === est) { this._diaOk = true; if (this.aoRefinar) this.aoRefinar(); } }, () => { this._diaOk = true; });
       }
+      if (this._diaOk) for (const k of this.luzesNoite || []) if (C[k] && C[k].lo && this.comLo) this.textura(C[k].lo, false, true);
     }
+  }
+  // SITES-054b: decode (never paint) the season's day layers - solind DIA_PREVER hours + albedo, normal, solvis. Promise = all decoded.
+  preverDia(est) {
+    const C = this.p.camadas;
+    if (this.liberado || !(C.solvis && C.solvis[est] && C.albedo && C.normal && C.solind && C.solind[est]) || !this.solNaEstacao(est)) return Promise.resolve([]);
+    const ps = [this.textura(C.albedo.arq), this.textura(C.normal.arq), ...[].concat(C.solvis[est].arq).map((a) => this.textura(a, true))];
+    for (const k of Object.keys(C.solind[est])) {
+      const mm = +k.slice(0, 2) * 60 + +k.slice(3, 5);
+      if (mm >= DIA_PREVER[0] && mm <= DIA_PREVER[1] && C.solind[est][k].arq) ps.push(this.textura(C.solind[est][k].arq, false, false, this.maxInd));
+    }
+    return Promise.all(ps);
   }
   rtMeia() {
     if (!this._rtMeia) {
@@ -803,6 +819,7 @@ void main(){
   }
   async _atualizar(estado) {
     if (this.liberado) return null;
+    this._prever(estado);   // SITES-054b: decide the night day-layer gate (_diaOk) BEFORE this paint asks for any 'lo' layer
     const usado = MisturaPonto.estadoDe(estado, this.luzesOrdem);
     const C = this.p.camadas;
     const ult = this.ultimo && this.ultimo.estado, dM = ult ? Math.abs(ult.minutos - usado.minutos) : 1e9;
@@ -848,7 +865,8 @@ void main(){
       tDir = pl.dir ? [C.albedo.arq, C.normal.arq, ...visArq].map((a) => this.pronta(a).tx) : null;
     }
     for (const it of pl.lista) if (it.c.lo && this.comLo) this.emUso.add(it.c.lo);
-    const loP = pl.lista.map((it) => it.c.lo && this.comLo ? this.textura(it.c.lo, false, true) : null);
+    // SITES-054b: the 'lo' refinement waits for the day layers at night (_diaOk false = still decoding them); undefined = not deferred
+    const loP = pl.lista.map((it) => it.c.lo && this.comLo && this._diaOk !== false ? this.textura(it.c.lo, false, true) : null);
     const txLo = await Promise.all(loP.map((p) => p ? Promise.race([p, Promise.resolve(void 0)]) : null));
     if (this.liberado) return null;
     if (txLo.some((t) => t === void 0)) Promise.all(loP).then(() => {

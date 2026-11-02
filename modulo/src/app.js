@@ -896,7 +896,7 @@ function preencherBarraInterior(u) {
     )
   ));
 }
-async function entrarApartamento(id, { semAnimacao = false, ponto = null } = {}) {
+async function entrarApartamento(id, { semAnimacao = false, ponto = null, luzes = null } = {}) {
   if (!b7Ativo("interiorProcedural") && !await manifestoTour360().catch(() => null)) {
     abrirPasseioReal();
     return;
@@ -927,7 +927,8 @@ async function entrarApartamento(id, { semAnimacao = false, ponto = null } = {})
       },
       aoFechar: () => pedirSaida("modulo"),
       ...inicioUsado ? {} : { ponto: INICIO_TOUR.ponto, luzes: INICIO_TOUR.luzes || void 0, reflexo: INICIO_TOUR.reflexo },
-      ...ponto ? { ponto } : {}
+      ...ponto ? { ponto } : {},
+      ...luzes ? { luzes } : {}
     });
     inicioUsado = true;
     {
@@ -1468,6 +1469,7 @@ if (window.parent !== window) {
         if (e.emDia && !e.andando) break;
         await new Promise((r) => setTimeout(r, 100));
       }
+      if (a.preverDia) await Promise.race([a.preverDia().catch(() => null), new Promise((r) => setTimeout(r, 2e4))]);   // SITES-054b
       const e = a.estado();
       if (d.irPara && d.irPara.ponto && e.ponto !== d.irPara.ponto) posta({ erro: { id: d.id, motivo: "ponto-invalido" } });
       else posta({ pronto: { id: d.id, tour: { ponto: e.ponto, minutos: e.minutos, estacao: e.estacao, luzes: { ...e.luzes }, reflexo: e.reflexo !== false } } });
@@ -1754,7 +1756,16 @@ if (window.parent !== window) {
         if (!interiorAberto) {
           if ($("#card").hidden || app.unidade !== u.id) abrirUnidade(u.id);
           marca("entrar");
-          await entrarApartamento(u.id, { semAnimacao: true, ponto: alvo.ponto || null });
+          // SITES-054 (02/11): the site's tour step may carry the block's hora / estacao / luzes, applied BEFORE the tour opens, so the
+          // first painted frame is already the block's (meio at 21:00) instead of the opening hour (09:00) followed by a repaint.
+          if (alvo.hora != null || alvo.estacao) {
+            const S = await carregarSol();
+            if (alvo.estacao) S.rel.estacao(alvo.estacao);
+            const h = typeof alvo.hora === "number" ? Math.round(alvo.hora) : hhmm(alvo.hora);
+            if (h != null && h >= 0 && h < 1440) S.rel.hora(Math.max(h, INICIO_TOUR.horamin ?? 0));
+          }
+          const lz = alvo.luzes == null ? null : typeof alvo.luzes === "string" ? Object.fromEntries(alvo.luzes.split(",").filter(Boolean).map((k) => [k, true])) : alvo.luzes;
+          await entrarApartamento(u.id, { semAnimacao: true, ponto: alvo.ponto || null, luzes: lz });
           marca("aberto");
         }
         let a = null;
@@ -1770,6 +1781,9 @@ if (window.parent !== window) {
           await espera(50);
         }
         marca("mostrado");
+        // SITES-054b (02/11): the site lifts its cover on this answer - only when the block's frame is painted AND the season's day
+        // layers are decoded, so the first drag back into the day is instant (cap 20 s: a dead network must not hold the cover forever)
+        if (a.preverDia) { await Promise.race([a.preverDia().catch(() => null), espera(2e4)]); marca("dia"); }
         if (alvo.ponto && a.estado().ponto !== alvo.ponto) {
           passoSig = sigDe(passoAtual());
           posta({ erro: { id: d.id, motivo: "ponto-invalido" } });
