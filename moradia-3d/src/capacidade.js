@@ -80,8 +80,12 @@ function capacidade() {
   if (q === "topo" || q === "medio" || q === "leve" || q === "medio-" || q === "ios") nivel = q;
   const T = {
     topo: { google: true, tilesMB: movel ? 700 : 1200, erro360: 8, larguraPano: 4096, dprMax: 3, parse: movel ? 3 : 8 },
-    ios: { google: true, tilesMB: 240, erro360: 16, larguraPano: 3072, dprMax: 2, parse: 2 },
-    medio: { google: true, tilesMB: 260, erro360: 24, larguraPano: 3072, dprMax: 2.5, parse: 2 },
+    // 19/11: the panorama width only sizes the MIXED render target shown on screen (the layers
+    // with a knee, the 12-bit complements and the sun visibility already load whole, 4096). 3072 -> 4096 costs ~30 MB of half-float
+    // target and is paid back at night, where the four sun textures (albedo, normal, 2 solvis) are no longer loaded (render-mix, dir only
+    // with the sun up). The crashes of 07-08/10 were the Google tile budget, which stays as it was; the fall guard still steps down to medio-.
+    ios: { google: true, tilesMB: 240, erro360: 16, larguraPano: 4096, dprMax: 2, parse: 2 },
+    medio: { google: true, tilesMB: 260, erro360: 24, larguraPano: 4096, dprMax: 2.5, parse: 2 },
     "medio-": { google: true, tilesMB: 200, erro360: 28, larguraPano: 2048, dprMax: 2, parse: 2 },
     leve: { google: false, tilesMB: 0, erro360: 32, larguraPano: 2048, dprMax: 1.5, parse: 1 }
   }[nivel];

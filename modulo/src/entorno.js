@@ -265,7 +265,12 @@ const FRAG = (
     vec3 vd = normalize(vec3(vW.x - cameraPosition.x, 0.0, vW.z - cameraPosition.z));
     vec3 sd = normalize(vec3(uSolW.x, 0.0, uSolW.z) + vec3(1e-4, 0.0, 0.0));
     float paraSol = 0.6 * pow(max(dot(vd, sd), 0.0), 8.0);
-    col = mix(col, mix(uHaze, uHazeQ, paraSol), 1.0 - exp(-(dist * uHazeD) * (dist * uHazeD)));
+    float hzD = uHazeD;
+    #ifdef ANEL
+    // the 2-5 km skyline sits in the city's haze, never brighter than the sky behind it (at dusk it read as a flat peach band)
+    hzD *= 2.6; paraSol = 0.0; col *= 0.7;
+    #endif
+    col = mix(col, mix(uHaze, uHazeQ, paraSol), 1.0 - exp(-(dist * hzD) * (dist * hzD)));
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }`

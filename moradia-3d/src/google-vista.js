@@ -446,7 +446,7 @@ function iniciarGoogle() {
         STATUS.luz = { el: Number.isFinite(el) ? +el.toFixed(2) : null, base: L.base.map((x) => +x.toFixed(4)), luzes: +L.luzes.toFixed(4), grade: Gr };
       };
       await new Promise((ok, falha) => {
-        const t = setTimeout(() => falha(new Error("timeout da raiz")), 2e4);
+        const t = setTimeout(() => falha(new Error("timeout da raiz")), 6e4);   // 09/11: 20 s lost the city for the whole visit on a busy machine
         const aoRaiz = () => {
           clearTimeout(t);
           STATUS.raiz++;
@@ -1491,6 +1491,19 @@ uniform float temJanela;
 uniform vec3 caixaMin;
 uniform vec3 caixaMax;
 uniform float usaCaixa;
+uniform vec3 solDir; // 09/11: unit vector to the sun in the panorama frame (y up; y < 0 at night)
+uniform float veuAtivo; // 09/11: 1 = the panorama below already carries the sky veil in the open part of the window (see compoeJanela)
+uniform vec3 veuTopo;
+uniform vec3 veuHoriz;
+// 09/11: the sky where Google drew nothing (above the roofs). Before: one flat band from the horizon colour to the top colour over 0-50 deg,
+// which read as a white sheet above the city by day. Now: a haze band in the first degrees, blue from ~10 deg up, brighter toward the sun
+// with a soft disc; by night the glow is off and the two night colours stay.
+vec3 ceuEm(vec3 d){
+  float h = clamp(d.y, 0.0, 1.0);
+  vec3 c = mix(ceuHoriz, ceuTopo, 1.0 - exp(-h * 4.0));
+  float g = max(dot(normalize(d), solDir), 0.0), dia = clamp(solDir.y * 8.0 + 0.3, 0.0, 1.0);
+  return c + ceuHoriz * (0.35 * pow(g, 6.0) + 0.6 * pow(g, 80.0)) * dia;
+}
 bool cubo(vec3 d, out vec4 g){
   float f = -d.x, r = -d.z;
   vec3 L = vec3(sin(rumoB) * f + cos(rumoB) * r, d.y, -(cos(rumoB) * f - sin(rumoB) * r));
@@ -1513,16 +1526,27 @@ bool cubo(vec3 d, out vec4 g){
   return false;
 }
 vec3 paraSrgb(vec3 c){ c = max(c, vec3(0.0)); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+vec3 deSrgb(vec3 c){ return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+// 09/11: on a window edge the veil pass left p = layer x (1 - m) + veil x m, and a plain "over" of the city took (1 - m) a second time: cords, leaves
+// and rims faded into the city. Here the veil is taken out of the panorama and the edge is mixed once. The layer is already tone mapped, so it is
+// used as a plain colour (adding it to the city went past white on bright objects).
+vec3 compoeJanela(vec3 cidade, float m){
+  vec3 p = texture2D(tPano, vUv).rgb; if (panoSrgb > 0.5) p = deSrgb(p);
+  vec3 veu = mix(veuHoriz, veuTopo, smoothstep(0.5, 0.78, vUv.y));
+  vec3 o = min(max(p - veu * m, vec3(0.0)) / max(1.0 - m, 0.04), vec3(1.0));
+  return mix(o, cidade, m);
+}
 void main(){
   float m = texture2D(tM, vUv).r;
   float phi = vUv.x * 6.28318530718, th = 3.14159265359 * (1.0 - vUv.y);
   vec3 d = vec3(cos(phi) * sin(th), cos(th), sin(phi) * sin(th));
-  vec3 ceu = mix(ceuHoriz, ceuTopo, smoothstep(0.5, 0.78, vUv.y));
+  vec3 ceu = ceuEm(d);
   vec3 rgb = vec3(0.0); float a = 0.0; // premultiplied output (blend ONE, ONE_MINUS_SRC_ALPHA)
   if (m > 0.002 && temJanela > 0.5) { // the window: Google's city where the pano's 'fora' mask is open
     vec4 g; bool ok = true;
     if (usaCubo > 0.5) ok = cubo(d, g); else { g = texture2D(tG, gl_FragCoord.xy / res); if (despre > 0.5 && g.a > 0.0) g.rgb /= g.a; }
-    if (ok) { float aw = m * forca; rgb += paraSrgb(mix(ceu, g3dOmbro(g.rgb * ganho, ombro), g.a)) * aw; a += aw;${typeof location !== "undefined" && /[?&]g3dburaco=1/.test(location.search) ? " if (vUv.y < 0.5 && g.a < 0.5) rgb = vec3(1.0, 0.0, 1.0) * aw;" : ""} } // face not shot yet: our render's city stays. 22/10 ITEM 8: ?g3dburaco=1 paints MAGENTA where Google drew nothing BELOW the horizon (the 'sky-coloured holes' under the balcony railing), for counting in tests
+    if (ok && veuAtivo > 0.5) { rgb += paraSrgb(compoeJanela(mix(ceu, g3dOmbro(g.rgb * ganho, ombro), g.a), m)) * forca; a += forca; }
+    else if (ok) { float aw = m * forca; rgb += paraSrgb(mix(ceu, g3dOmbro(g.rgb * ganho, ombro), g.a)) * aw; a += aw;${typeof location !== "undefined" && /[?&]g3dburaco=1/.test(location.search) ? " if (vUv.y < 0.5 && g.a < 0.5) rgb = vec3(1.0, 0.0, 1.0) * aw;" : ""} } // face not shot yet: our render's city stays. 22/10 ITEM 8: ?g3dburaco=1 paints MAGENTA where Google drew nothing BELOW the horizon (the 'sky-coloured holes' under the balcony railing), for counting in tests
   }
   if (usaVidro > 0.5) {
     vec2 v = texture2D(tV, vUv).rg;
@@ -1547,7 +1571,7 @@ void main(){
       if (!ok) { g = vec4(0.0); ok = true; mR = 0.0; } // no picture of the city here yet: the balcony still reflects
       if (ok) {
         float w = v.r * (0.25 + 0.75 * v.g) * forcaV * forca;
-        rgb += paraSrgb(mix(pR, mix(ceu, g3dOmbro(g.rgb * ganho, ombro), g.a), mR)) * w; a += w * kDiaV; // 08/10 review: the floor of the balcony blocks the city in the reflection
+        rgb += paraSrgb(mix(pR, mix(ceuEm(vec3(-d.x, d.y, d.z)), g3dOmbro(g.rgb * ganho, ombro), g.a), mR)) * w; a += w * kDiaV; // 08/10 review: the floor of the balcony blocks the city in the reflection
       }
     }
   }
@@ -1602,7 +1626,11 @@ function materialSobreposicao() {
       ombro: { value: new THREE.Vector2(0.6, 0) },
       despre: DESPRE,
       ceuTopo: { value: new THREE.Vector3(0.12, 0.27, 0.6) },
-      ceuHoriz: { value: new THREE.Vector3(0.55, 0.66, 0.8) }
+      ceuHoriz: { value: new THREE.Vector3(0.55, 0.66, 0.8) },
+      solDir: { value: new THREE.Vector3(0, -1, 0) },
+      veuAtivo: { value: 0 },
+      veuTopo: { value: new THREE.Vector3() },
+      veuHoriz: { value: new THREE.Vector3() }
     }
   });
 }

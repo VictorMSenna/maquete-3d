@@ -14,7 +14,7 @@ if (params.get("embutido") === "1") {
   document.documentElement.classList.add("embutido");
   const st = document.createElement("style");
   st.id = "embutido-css";
-  st.textContent = "html.embutido .cena,html.embutido .cena canvas,html.embutido .t360,html.embutido .t360-cv{touch-action:pan-y!important}";
+  st.textContent = "html.embutido .cena,html.embutido .cena canvas,html.embutido .t360,html.embutido .t360-cv,html.embutido .sol-range,html.embutido .sol-btn{touch-action:pan-y!important}";
   document.head.appendChild(st);
 }
 const hhmm = (s) => {
@@ -34,7 +34,22 @@ const TESTE = params.has("teste");
 const REVISAO = params.has("revisao");
 const FORCAR_SEM_3D = params.has("semwebgl");
 if (params.get("modo") === "vitrine") document.documentElement.classList.add("vitrine");
-const $ = (s, r = document) => r.querySelector(s);
+// &relogio=site: the page's instrument bar is the outside hour control, so the module's own sun bar and its button stay hidden
+// outside the 360 tour (the tour keeps its own hour bar).
+if (params.get("relogio") === "site") {
+  document.documentElement.classList.add("relogio-site");
+  const st = document.createElement("style");
+  st.textContent = "html.relogio-site #sol-painel,html.relogio-site #btn-sol{display:none!important}";
+  document.head.appendChild(st);
+}
+// Embedded in the site: two families only (G30, page + module). Controls that asked for 'Archivo' (not shipped), system-ui or
+// Georgia take the module's own Inter (--f-body), the face its other controls already use.
+if (params.get("embutido") === "1") {
+  const st = document.createElement("style");
+  st.textContent = ".chip-foto,.chip-lista,.cd-voltar,.foto-escolher,.t360,.t360-rot-i,.t360-vg-credito,.int-raiz,.g3d-cred,.g3d-carga{font-family:var(--f-body)!important}.t360-rot-i{font-style:normal!important}";
+  document.head.appendChild(st);
+}
+const $ =(s, r = document) => r.querySelector(s);
 const desktop = () => window.matchMedia("(min-width: 1000px)").matches;
 const porId = new Map(UNIDADES.map((u) => [u.id, u]));
 const porNumero = new Map(UNIDADES.map((u) => [u.numero, u]));
@@ -598,6 +613,40 @@ function mostrarEtiqueta(h) {
   e.style.top = h.y + "px";
   e.hidden = false;
 }
+// Embedded, phone: the hour rail and the hold button had touch-action:none and the rail's touchstart called preventDefault (sol.js), so a
+// vertical drag that started on the bar never scrolled the page and the next drag from the same spot landed on the bar again. Here
+// (embedded only): pan-y on both, the rail's touchstart stops at the bar (capture) so the sol.js listener is not reached, the rail's own
+// native thumb stays on the clock's hour, and a press the browser turns into a page scroll (pointercancel) puts the hour back.
+// sol.js itself is unchanged. Same rule as the second tour's bar.
+function toqueSolEmbutido(caixa, rel) {
+  if (!document.documentElement.classList.contains("embutido") || !caixa) return caixa;
+  const faixa = caixa.querySelector(".sol-range");
+  let toqueNoTrilho = false, horaAntes = null;
+  caixa.addEventListener("touchstart", (e) => {
+    if (e.target === faixa) {
+      toqueNoTrilho = true;
+      e.stopPropagation();
+    }
+  }, { capture: true, passive: true });
+  const fimToque = () => setTimeout(() => { toqueNoTrilho = false; }, 0);
+  caixa.addEventListener("touchend", fimToque, true);
+  caixa.addEventListener("touchcancel", fimToque, true);
+  const segura = (e) => {
+    if (toqueNoTrilho && e.target === faixa) {
+      e.stopImmediatePropagation();
+      faixa.value = String(Math.round(rel.info().t));
+    }
+  };
+  caixa.addEventListener("input", segura, true);
+  caixa.addEventListener("change", segura, true);
+  caixa.addEventListener("pointerdown", (e) => { horaAntes = e.pointerType === "touch" ? rel.info().t : null; }, true);
+  caixa.addEventListener("pointerup", () => { horaAntes = null; });
+  caixa.addEventListener("pointercancel", () => {
+    if (horaAntes != null) rel.hora(horaAntes);
+    horaAntes = null;
+  });
+  return caixa;
+}
 let solMod = null;
 let solPromessa = null;
 function carregarSol() {
@@ -611,7 +660,21 @@ function carregarSol() {
 async function carregarSolUmaVez() {
   const [dados, mod] = await Promise.all([import("./dados-sol.js"), import("./sol.js")]);
   const rel = mod.criarRelogio(dados.SOL, CONFIG);
-  solMod = { ...mod, SOL: dados.SOL, VIZ: dados.VIZINHOS, rel, ctl: null };
+  solMod = { ...mod, controleSol: (r, c, o) => toqueSolEmbutido(mod.controleSol(r, c, o), r), SOL: dados.SOL, VIZ: dados.VIZINHOS, rel, ctl: null };
+  // &relogio=site (embedded): the page draws the hour outside the scene, so every change of the outside clock is posted to it
+  // (one message per whole minute), whoever moved it: the page's own track, this module's sun bar or the hold button.
+  if (params.get("relogio") === "site" && window.parent !== window) {
+    let minutoAnt = -1;
+    rel.ouvir((i) => {
+      const m = Math.round(i.t);
+      if (m === minutoAnt) return;
+      minutoAnt = m;
+      try {
+        window.parent.postMessage({ fonte: "modulo-3d", relogio: { minutos: m, noite: i.noite > 0.5 } }, "*");
+      } catch (e) {
+      }
+    });
+  }
   let estAnt = null;
   let solPend = null, solRaf = 0, estPend = false;
   rel.ouvir((i) => {

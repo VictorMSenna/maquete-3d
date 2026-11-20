@@ -50,6 +50,18 @@ uniform vec3 g[7];
 uniform float esc[7];
 uniform float gama;
 uniform float ombro;
+uniform float contr;
+uniform float altoK;
+uniform float altoP;
+uniform float altoS;
+uniform float solAltoK;
+uniform float solAltoP;
+uniform float ehCeu[7];
+uniform float gFundo;
+uniform float fundoCap;
+uniform float fundoSat;
+uniform vec3 fundoTinta;
+uniform float noiteK;
 uniform float joelho[7];
 uniform float joelho2[7];
 uniform float gamaL[7];
@@ -114,6 +126,7 @@ uniform float nInt;
 uniform float usaVis;
 uniform vec3 gDir;
 uniform vec3 solDir;
+uniform float satSol;
 uniform float meioMin;
 uniform vec2 visTam;
 #ifndef USA_AC
@@ -173,18 +186,22 @@ vec3 neutral(vec3 c){
 }
 void main(){
   vec2 vUvR = modoLum > 1.5 ? refUv + (vUv - 0.5) * refSpan : vUv;   // 28/10: modoLum 2/3 = the white-reference window, linear RGB
-  vec3 s = vec3(0.0);
+  vec3 s = vec3(0.0), sF = vec3(0.0), sDir = vec3(0.0);
   float foR = semRefl > 0.5 && usaFora > 0.5 ? texture2D(tFora, vUvR).r : 0.0; // ITEM 12
   ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) { vec3 c${i} = texture2D(t[${i}], vUvR).rgb; if (joelho[${i}] <= 0.0 && dbT > 0.0) c${i} = deband(t[${i}], vUvR, c${i});
 #ifdef COM_LO
   if (loIdx[${i}] > -0.5) { vec3 lo${i} = loTex(loIdx[${i}], vUvR); c${i} = c${i} * (4080.0 / 4095.0) + lo${i} * (15.0 / 4095.0); }
 #endif
-  s += g[${i}] * esc[${i}] * decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]) * (1.0 - ehLuz[${i}] * foR); }`).join("\n  ")}
+  vec3 d${i} = decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]);
+  s += g[${i}] * esc[${i}] * d${i} * (1.0 - ehLuz[${i}] * foR); if (ehCeu[${i}] > 0.5) sF += esc[${i}] * d${i}; }`).join("\n  ")}
   if (usaVis > 0.5) {
     vec3 alb = pow(texture2D(tAlb, vUvR).rgb, vec3(2.2));
     vec3 n = normalize(texture2D(tNor, vUvR).rgb * 2.0 - 1.0);
-    s += gDir * alb * max(dot(n, solDir), 0.0) * visSol(vUvR);
+    alb = mix(vec3(dot(alb, vec3(0.2126, 0.7152, 0.0722))), alb, satSol);   // 09/11: sunlit colour is not pure albedo (sheen and gloss wash it)
+    sDir = gDir * alb * max(dot(n, solDir), 0.0) * visSol(vUvR);
+    s += sDir;
   }
+  float fSol = dot(sDir, vec3(0.2126, 0.7152, 0.0722)) / max(dot(s, vec3(0.2126, 0.7152, 0.0722)), 1e-6);   // share of the pixel lit by the direct sun
   vec3 x = s * wb * expo;
   vec2 foP = usaFora > 0.5 ? texture2D(tFora, vUvR).rg : vec2(0.0);
   float fo = foP.x;
@@ -207,9 +224,24 @@ void main(){
   if (usaFora > 0.5) x *= mix(1.0, fatorFora, fo); // v4: window exposed on its own
   if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUvR); float r = exp2(clamp((lG - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
   float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+  if (gFundo > 0.0 && fo < 1.0) {   // 09/11 night floor: the room's dim form, drawn apart from the lamps' white balance, capped, and it gives way where a lamp already lights the pixel
+    float lS = dot(sF, vec3(0.2126, 0.7152, 0.0722)), lf = lS * gFundo * expo;
+    lf = lf / (1.0 + lf / fundoCap);
+    vec3 F = lf * mix(vec3(1.0), sF / max(lS, 1e-6), fundoSat) * fundoTinta;
+    x += F * exp(-0.4 * l / max(lf, 1e-6)) * (1.0 - fo);   // 0.4 < 1: the total never falls as l grows, whatever the tint
+    l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+  }
+  if (noiteK > 0.0 && fo < 1.0 && l > 0.35) {   // a surface lit by warm lamps is never bluer than the lamp: a lamp shade that reached the top of its layer code is neutral there and the white balance turned it blue
+    vec3 q = vec3(x.r, min(x.g, x.r * 0.86), min(x.b, x.r * 0.62));
+    x = mix(x, q, smoothstep(0.35, 1.2, l) * noiteK * (1.0 - fo));
+    l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+  }
+  if (contr != 1.0) { x *= pow(max(l, 1e-6) / 0.18, contr - 1.0); l = dot(x, vec3(0.2126, 0.7152, 0.0722)); }   // 09/11: contrast about 18 % grey (the key is solved through it)
+  float aK = altoK * mix(1.0, solAltoK, fSol), aP = mix(altoP, solAltoP, fSol);   // where the sun lights the pixel the knee comes lower and the curve flatter: floor and fabric in the sun keep their texture instead of reading white
+  if (aK > 0.0 && aP < 1.0 && l > aK) { float u = log(l / aK), u2 = u * aP + (1.0 - aP) * altoS * (1.0 - exp(-u / altoS)), l2 = aK * exp(u2); x *= l2 / l; l = l2; }   // 09/11: power-law highlight curve with a C1 knee: the shoulder below tops out at 1 + ombro, so without this a lamp at 2 and at 30 read the same flat white
   x *= (1.0 + 1.0 / ombro) / (1.0 + l / ombro);   // soft highlight roll-off; 08/10 review: white bed blown in daylight -> stronger shoulder (1.1)
   vec3 o = neutral(x);
-  { float m_ = max(o.r, max(o.g, o.b)); float t_ = smoothstep(0.85, 1.0, m_); o = o + (vec3(m_) - o) * t_; }   // 28/10 N10: a clipping highlight goes neutral, not blue-cyan
+  { float m_ = max(o.r, max(o.g, o.b)); float t_ = smoothstep(0.85, 1.0, m_); o = o + (m_ * mix(vec3(1.0), vec3(1.0, 0.93, 0.8), noiteK * (1.0 - fo)) - o) * t_; }   // 28/10 N10: a clipping highlight goes neutral, not blue-cyan
   if (veuFora > 0.5 && fo > 0.0) o = mix(o, mix(veuHoriz, veuTopo, smoothstep(0.5, 0.78, vUvR.y)), fo); // 21/10 SACADA-GOOGLE-JA
   if (srgb > 0.5) o = mix(o * 12.92, 1.055 * pow(max(o, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, o));
   gl_FragColor = vec4(o, 1.0);
@@ -360,6 +392,37 @@ class MisturaPonto {
     this.luzesOrdem = luzes;
     this.cfg = cena || {};   // MORADIA-CONSERTO 26/10: rbNoite, wbNoite, deband, solInterino, ceuMinLux, corCeuNoite ('cfg': this.cena is the THREE.Scene below)
     this.rbNoite = this.cfg.rbNoite || 1.25;
+    {   // 09/11 VISOR-LUZ: look parameters (manifest 'cena' / point 'ref_branca'; the URL overrides are for A/B sheets only)
+      const Q = new URLSearchParams(location.search), num = (k, m, d) => { const v = parseFloat(Q.get(k)); return Number.isFinite(v) ? v : Number.isFinite(m) ? m : d; };
+      const cor = (k) => { const v = (Q.get(k) || "").split(",").map(Number); return v.length === 3 && v.every(Number.isFinite) ? v : null; };
+      this.ombroDia = num("ombro", this.cfg.ombroDia, OMBRO_DIA);
+      this.ombroNoite = num("ombronoite", this.cfg.ombroNoite, OMBRO_NOITE);
+      this.contrDia = num("contraste", this.cfg.contrasteDia, CONTR_DIA);
+      this.contrNoite = num("contrastenoite", this.cfg.contrasteNoite, CONTR_NOITE);
+      this.fundoNoite = num("fundonoite", this.cfg.noiteFundo, FUNDO_NOITE);
+      this.fundoSat = num("fundosat", this.cfg.noiteFundoSat, FUNDO_SAT);
+      this.fundoMult = num("fundocap", this.cfg.noiteFundoCap, FUNDO_CAP);
+      { const v = (Q.get("fundotinta") || "").split(",").map(Number); this.fundoTinta = v.length === 3 && v.every(Number.isFinite) ? v : Array.isArray(this.cfg.noiteFundoTinta) && this.cfg.noiteFundoTinta.length === 3 ? this.cfg.noiteFundoTinta : FUNDO_TINTA; }
+      {
+        const tri = (k, m, d) => { const v = (Q.get(k) || "").split(",").map(Number); return v.length === 3 && v.every(Number.isFinite) ? v : Array.isArray(m) && m.length === 3 ? m : d; };
+        this.altoDia = tri("altodia", this.cfg.altoDia, ALTO_DIA);   // [knee, power, knee width in log units]
+        this.altoNoite = tri("altonoite", this.cfg.altoNoite, ALTO_NOITE);
+      }
+      this.solMax = num("solmax", this.cfg.solDiretoMax, SOL_MAX);
+      this.satSol = num("satsol", this.cfg.solDiretoSat, SAT_SOL);
+      this.solAltoK = num("soltk", this.cfg.solAltoJoelho, SOL_ALTO_K);   // knee of the highlight curve where the sun is the light, as a share of the day knee
+      this.solAltoP = num("soltp", this.cfg.solAltoPot, SOL_ALTO_P);
+      this.RB = ponto.ref_branca ? { ...ponto.ref_branca } : null;
+      if (this.RB) for (const [k, q, c] of [["alvo_noite", "alvonoite", "alvoNoite"], ["alvo_dia", "alvodia", "alvoDia"]]) {   // scene-wide target (cena.alvoDia / alvoNoite) over the point's, URL over both
+        const m = this.cfg[c], v = cor(q) || (Array.isArray(m) && m.length === 3 ? m : null);
+        if (v) this.RB[k] = v;
+      }
+      {   // day exposure offset (EV) over every point's own day cut: with a firmer day highlight curve the key can sit a little lower and the light floor by the glass keeps its texture
+        const dEV = num("diaev", this.cfg.diaEV, DIA_EV);
+        if (this.RB && dEV) { const a = this.RB.ajuste_ev || {}; this.RB.ajuste_ev = { ...a, dia: (a.dia || 0) + dEV }; }
+      }
+      this.refPresa = Q.get("refpresa") !== "0";   // ?refpresa=0 = the rule of before 09/11 (exposure follows the lamps that are on), A/B only
+    }
     this.wbNoite = Number.isFinite(this.cfg.wbNoite) ? this.cfg.wbNoite : 0.15;
     this.r = renderer;
     this.p = ponto;
@@ -388,7 +451,19 @@ class MisturaPonto {
         g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) },
         gama: { value: 2.2 },
-        ombro: { value: +new URLSearchParams(location.search).get("ombro") || 1.1 },
+        ombro: { value: this.ombroDia },
+        contr: { value: 1 },
+        altoK: { value: 0 },
+        altoP: { value: 1 },
+        altoS: { value: 0.3 },
+        solAltoK: { value: this.solAltoK },
+        solAltoP: { value: this.solAltoP },
+        ehCeu: { value: Array(7).fill(0) },
+        gFundo: { value: 0 },
+        fundoCap: { value: 1 },
+        fundoSat: { value: this.fundoSat },
+        fundoTinta: { value: new THREE.Vector3(...this.fundoTinta) },
+        noiteK: { value: 0 },
         joelho: { value: Array(7).fill(0) },
         joelho2: { value: Array(7).fill(0.95) },
         gamaL: { value: Array(7).fill(2.2) },
@@ -435,6 +510,7 @@ class MisturaPonto {
         usaVis: { value: 0 },
         gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) },
+        satSol: { value: this.satSol },
         tAc: { value: PRETO },
         meioMin: { value: 0 },
         visTam: { value: new THREE.Vector2(1, 1) },
@@ -489,9 +565,10 @@ void main(){
     const v = this.cache.get(rel);
     this.cache.delete(rel);
     this.cache.set(rel, v);
-    while (this.cache.size > 16) {
-      const [k, p] = this.cache.entries().next().value;
-      if (this.emUso && this.emUso.has(k)) break;
+    if (this.cache.size > 16) for (const k of [...this.cache.keys()]) {   // 16 layers, oldest first; a layer of the state in use is skipped, never evicted (20/11)
+      if (this.cache.size <= 16) break;
+      if (this.emUso && this.emUso.has(k)) continue;
+      const p = this.cache.get(k);
       this.cache.delete(k);
       p.then((t) => t && t.dispose());
     }
@@ -557,11 +634,12 @@ void main(){
     // MORADIA-CONSERTO (D3/D4): the sky term never drops below the city glow (ceuMinLux), so a night with every lamp off is dim, never black
     // 26/10 (review item 16): the open balcony gets more city glow than the rooms (ceuMinLuxPonto), so lamps-off 23:00 reads as a dark night,
     // not black; indoors stays at ceuMinLux (raising it there moved the leather hue 23 -> 12 deg, rule 28)
-    const cml = this.cfg.ceuMinLuxPonto && this.p && this.cfg.ceuMinLuxPonto[this.p.id] != null ? this.cfg.ceuMinLuxPonto[this.p.id] : this.cfg.ceuMinLux || 0;
-    if (C.ceu) lista.push({ c: C.ceu, g: cc.map((x) => x * Math.max(dhiLux(el), cml) / LUX_W) });
+    // 09/11: with the night floor (noiteFundo) on, the balcony no longer gets its own larger sky term: under the lamps' white balance that term painted the whole balcony blue
+    const cml = this.fundoNoite <= 0 && this.cfg.ceuMinLuxPonto && this.p && this.cfg.ceuMinLuxPonto[this.p.id] != null ? this.cfg.ceuMinLuxPonto[this.p.id] : this.cfg.ceuMinLux || 0;
+    if (C.ceu) lista.push({ c: C.ceu, g: cc.map((x) => x * Math.max(dhiLux(el), cml) / LUX_W), gRef: cc.map((x) => x * dhiLux(el) / LUX_W), ceu: cc, lux: Math.max(dhiLux(el), cml) });
     const v4 = !!(C.solvis && C.solvis[estacao] && C.albedo && C.normal && C.solind && C.solind[estacao]);
     let dir = null;
-    if (v4 && fSol > 0) {
+    if (v4 && fSol > 0 && dniLux(el) > 0) {   // 19/11: no direct term (and no albedo/normal/solvis textures held) with the sun down
       const k = this.p.solvis_k || C.solvis_k || 1;
       const gd = cs.map((x) => x * dniLux(el) * k * fSol / LUX_W);
       const md = mediaVis((this.p.solvis_media || C.solvis_media || {})[estacao], minutos);
@@ -588,18 +666,30 @@ void main(){
       if (fb > 0) lista.push({ c: sol[nome(pos)], g: cs.map((x) => x * gs * fb) });
     }
     const gl = Number.isFinite(ganhoLuz) ? ganhoLuz : 1;   // MORADIA-CONSERTO D4: automatic lamps fade in by sun elevation
-    for (const k of this.luzesOrdem) if (luzes && luzes[k] && C[k] && gl > 0) lista.push({ c: C[k], g: [gl, gl, gl], luz: true });
+    // 09/11 VISOR-LUZ: every entry carries gRef, its gain in the REFERENCE state of this hour = the automatic state (natural light of the
+    // hour without the city-glow floor + every night lamp of the point at the automatic gain of the hour, rampaLuz). Exposure, white
+    // balance and everything derived from the means below are solved for the reference, never for the lamps that happen to be on, so
+    // a lamp switched on can only add light and a lamp switched off can only remove it. A reference lamp that is off stays in the list
+    // with g = 0 (the shader skips it) because its texture is needed to measure the reference (with its -lo file, so the measurement
+    // is the same 12-bit one whether the lamp is on or off).
+    const rampa = this.refPresa ? this.rampaLuz(el) : 0, deNoite = this.cfg.luzesNoite || this.luzesOrdem;
+    for (const k of this.luzesOrdem) if (C[k]) {
+      const gk = luzes && luzes[k] && gl > 0 ? gl : 0, rk = !this.refPresa ? gk : deNoite.includes(k) ? rampa : 0;
+      if (gk > 0 || rk > 0) lista.push({ c: C[k], g: [gk, gk, gk], gRef: [rk, rk, rk], luz: true });
+    }
+    if (!this.refPresa) for (const it of lista) it.gRef = it.g;
+    const gR = (it) => it.gRef || it.g;
     const media = [0, 0, 0];
-    for (const it of lista) for (let i = 0; i < 3; i++) media[i] += it.g[i] * it.c.media[i];
+    for (const it of lista) for (let i = 0; i < 3; i++) media[i] += gR(it)[i] * it.c.media[i];
     let mDentro = null, mFora = null, mDia = null;
     if (lista.length && lista.every((it) => it.c.media_dentro && it.c.media_fora)) {
       mDentro = [0, 0, 0];
       mFora = [0, 0, 0];
       mDia = [0, 0, 0];
       for (const it of lista) for (let i = 0; i < 3; i++) {
-        mDentro[i] += it.g[i] * it.c.media_dentro[i];
-        mFora[i] += it.g[i] * it.c.media_fora[i];
-        if (!it.luz) mDia[i] += it.g[i] * it.c.media_dentro[i];
+        mDentro[i] += gR(it)[i] * it.c.media_dentro[i];
+        mFora[i] += gR(it)[i] * it.c.media_fora[i];
+        if (!it.luz) mDia[i] += gR(it)[i] * it.c.media_dentro[i];
       }
       const P = this.p, md = (P.solvis_media_dentro || {})[estacao], mf = (P.solvis_media_fora || {})[estacao];
       if (dir && md && mf) {
@@ -614,15 +704,28 @@ void main(){
     if (dir && dir.media) for (let i = 0; i < 3; i++) media[i] += dir.g[i] * dir.media[i];
     return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos, fSol };
   }
+  rampaLuz(el) {   // the automatic lamp gain at this sun elevation: the same curve as the tour's own automatic lamps (cena.luzRampa)
+    const R = this.cfg.luzRampa;
+    if (!Array.isArray(R)) return el < -2 ? 1 : 0;
+    const t = Math.min(1, Math.max(0, (R[0] - el) / (R[0] - R[1])));
+    return t * t * (3 - 2 * t);
+  }
   async _atualizar(estado) {
     if (this.liberado) return null;
     const usado = MisturaPonto.estadoDe(estado, this.luzesOrdem);
     const pl = this.plano(estado);
-    this.emUso = new Set(pl.lista.map((it) => it.c.arq));
     const C = this.p.camadas;
     const visArq = pl.dir ? [].concat(pl.dir.vis.arq) : [];
+    // 20/11 (VER-POSD 5a rodada): the WHOLE set this state needs is marked in use before the first request, so the LRU below can never
+    // evict a texture of the current state (before, the sun maps, the -lo complements and 'fora' were requested first and marked after: at
+    // dusk a set of 14-16 with a cap of 12 evicted and re-downloaded the same files in a loop)
+    this.emUso = new Set(pl.lista.map((it) => it.c.arq));
+    if (pl.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
+    if (this.comLo) for (const it of pl.lista) if (it.c.lo) this.emUso.add(it.c.lo);
+    if (C.fora) this.emUso.add(C.fora.arq);
     const tDir = pl.dir ? await Promise.all([this.textura(C.albedo.arq), this.textura(C.normal.arq), ...visArq.map((a) => this.textura(a, true))]) : null;
     if (pl.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
+    const liga = (it) => it.g[0] + it.g[1] + it.g[2] > 0;   // a reference lamp that is off is measured (12 bits, like when it is on) but never drawn
     for (const it of pl.lista) if (it.c.lo && this.comLo) this.emUso.add(it.c.lo);
     const loP = pl.lista.map((it) => it.c.lo && this.comLo ? this.textura(it.c.lo, false, true) : null);
     const tx = await Promise.all(pl.lista.map((it) => this.textura(it.c.arq, false, !!it.c.joelho)));
@@ -672,6 +775,7 @@ void main(){
       U.g.value[i].set(...it ? it.g : [0, 0, 0]);
       U.esc.value[i] = it ? it.c.escala : 1;
       U.ehLuz.value[i] = it && it.luz ? 1 : 0;
+      U.ehCeu.value[i] = it && it.ceu ? 1 : 0;
       U.joelho.value[i] = it && it.c.joelho || 0;
       U.joelho2.value[i] = it && it.c.joelho2 || 0.95;
       U.y2.value[i] = it && it.c.y2 || 2;
@@ -714,7 +818,7 @@ void main(){
     let mDiaW = pl.mDia;
     if (!mDiaW) {
       mDiaW = [0, 0, 0];
-      for (const it of pl.lista) if (!it.luz) for (let i = 0; i < 3; i++) mDiaW[i] += it.g[i] * it.c.media[i];
+      for (const it of pl.lista) if (!it.luz) for (let i = 0; i < 3; i++) mDiaW[i] += (it.gRef || it.g)[i] * it.c.media[i];
       if (pl.dir && pl.dir.media) for (let i = 0; i < 3; i++) mDiaW[i] += pl.dir.g[i] * pl.dir.media[i];
     }
     const wN = mLuz ? balanco(mLuz, this.wbNoite, true) : balanco(m, this.wbNoite, true);
@@ -756,16 +860,50 @@ void main(){
       const tac = prepassoAcesa(this.r, U);
       if (tac) U.tAc.value = tac;
     }
-    let refUsado = null;
-    const RB = this.p.ref_branca;
-    if (RB && !new URLSearchParams(location.search).has("semref")) {   // 28/10: white-reference rule (see regraRef)
-      const rK = this.medeRef(RB);
+    let refUsado = null, noiteUsada = null, solUsado = null;
+    const RB = this.RB;
+    U.noiteK.value = 1 - kDia;
+    U.ombro.value = this.ombroNoite ** (1 - kDia) * this.ombroDia ** kDia;   // 09/11: the night holds its highlights with its own shoulder
+    U.contr.value = this.contrNoite + (this.contrDia - this.contrNoite) * kDia;
+    for (const [i, u] of [[0, "altoK"], [1, "altoP"], [2, "altoS"]]) U[u].value = this.altoNoite[i] + (this.altoDia[i] - this.altoNoite[i]) * kDia;
+    U.gFundo.value = 0;   // never part of a measurement
+    TELA_ALTO.k = U.altoK.value; TELA_ALTO.p = U.altoP.value; TELA_ALTO.s = U.altoS.value;
+    if (RB && !new URLSearchParams(location.search).has("semref")) {   // 28/10: white-reference rule (see regraRef); 09/11: measured in the REFERENCE state
+      const gRef = pl.lista.map((it) => it.gRef || it.g);
+      // 09/11 direct sun: the sun computed here (albedo x n.L x visibility) arrives 30-70 times stronger than the room's own light
+      // (white key), so everything it touches left the display range as a flat white patch. Its strength at normal incidence on a white
+      // surface is held to solMax times the room's light WITHOUT it (smooth saturation, continuous through sunrise and sunset).
+      if (U.usaVis.value && this.solMax > 0) {
+        const rA = this.medeRef(RB, gRef, 0), eD = lumJ(U.gDir.value.toArray()) * 0.8;
+        if (rA && eD > 0) {
+          const rho = eD / lumJ(rA), k = this.solMax * (1 - Math.exp(-rho / this.solMax)) / rho;
+          U.gDir.value.multiplyScalar(k);
+          solUsado = { razao: rho, ganho: k };
+        }
+      }
+      const rK = this.medeRef(RB, gRef, 1);
       if (rK) {
-        const r0 = rK.map((v) => v / K), sol = regraRef(r0, kDia, U.ombro.value, RB), f = sol.ex / K;
+        const r0 = rK.map((v) => v / K), sol = regraRef(r0, kDia, U.ombro.value, RB, U.contr.value), f = sol.ex / K;
+        // 09/11 night floor: with every lamp off the room shows only a dim, nearly colourless form. The first version lifted the SKY layer
+        // itself about 70x under the lamps' white balance (blue x 2.4): where the window feeds that layer (floor by the balcony, table, ceiling)
+        // it came out as a blue-white glow and a lilac ceiling, even with the lamps on. Now it is a separate term in the shader: luminance of the
+        // sky layer, own tint and saturation (fundoSat, fundoTinta), capped at fundoMult x the level of the white key, and it fades per pixel
+        // where the lamps already light it (x + F e^(-l/lf): luminance never falls as l grows). It reads 'fundoNoite' on the white key.
+        const iC = pl.lista.findIndex((it) => it.ceu);
+        if (iC >= 0 && this.fundoNoite > 0 && kDia < 1) {
+          if (this._chaveCeu === void 0) { const q = this.medeRef(RB, pl.lista.map((it, i) => i === iC ? [1, 1, 1] : [0, 0, 0]), 0); this._chaveCeu = q ? q.map((v) => v / K) : null; }
+          const kc = this._chaveCeu;
+          if (kc) {
+            const lD = exPara([1, 1, 1], [1, 1, 1], this.fundoNoite, U.ombro.value, U.contr.value), cap = this.fundoMult * lD, cru = lD / Math.max(1 - lD / cap, 1e-3);
+            U.fundoCap.value = cap;
+            U.gFundo.value = cru / (lumJ(kc) * sol.ex) * (1 - kDia);
+            noiteUsada = { gFundo: U.gFundo.value, cap, ceuLux: pl.lista[iC].lux };
+          }
+        }
         U.wb.value.set(...sol.wb);
         for (let i = 0; i < 7; i++) U.esc.value[i] *= f;
         U.gDir.value.multiplyScalar(f);
-        refUsado = { r0, wb: sol.wb, ev: Math.log2(sol.ex), leitura: sol.leitura, kDia };
+        refUsado = { r0, wb: sol.wb, ev: Math.log2(sol.ex), leitura: sol.leitura, kDia, ombro: U.ombro.value, contr: U.contr.value };
       }
     }
     const qs = new URLSearchParams(location.search).get("sloc"), sDia = refUsado ? 0 : qs !== null && qs !== "" ? +qs : 0.6;   // 28/10: no local key on top of the white-reference rule
@@ -832,24 +970,31 @@ void main(){
       ...pl,
       expo: K * U.expo.value,
       ref: refUsado,
+      noite: noiteUsada,
+      solDireto: solUsado,
       lG: U.lG.value + Math.log2(U.expo.value),
       estado: usado,
       veu: U.veuFora.value,
       nLo: this.nLo,
       bits12: pl.lista.map((it, i) => U.loIdx.value[i] >= 0 ? it.c.arq : null).filter(Boolean),
-      bits8: pl.lista.map((it, i) => it.c.lo && U.loIdx.value[i] < 0 ? it.c.arq : null).filter(Boolean)
+      bits8: pl.lista.map((it, i) => it.c.lo && liga(it) && U.loIdx.value[i] < 0 ? it.c.arq : null).filter(Boolean)
     };
     return this.rt.texture;
   }
-  medeRef(RB) {   // 28/10: linear RGB of the composite (two 64x32 passes, 16 bits/channel, log2 -16..+4). v2 'chave': whole panorama,
+  medeRef(RB, gs = null, kDir = 1) {   // 09/11: 'gs' = per-entry gains to measure with (the reference state), 'kDir' 0 = without the direct sun. 28/10: linear RGB of the composite (two 64x32 passes, 16 bits/channel, log2 -16..+4). v2 'chave': whole panorama,
     // white-albedo cells of the manifest mask (bottom row first), brightest 5 % dropped, median per channel = the point's white key
     const U = this.mat.uniforms, wb0 = U.wb.value.clone(), ex0 = U.expo.value, chave = RB.modo === "chave";
+    const g0 = U.g.value.map((v) => v.clone()), d0 = U.gDir.value.clone();
+    if (gs) for (let i = 0; i < 7; i++) U.g.value[i].set(...gs[i] || [0, 0, 0]);
+    U.gDir.value.multiplyScalar(kDir);
     U.wb.value.set(1, 1, 1); U.expo.value = 1; U.refUv.value.set(chave ? 0.5 : RB.uv[0], chave ? 0.5 : RB.uv[1]);
     if (chave) U.refSpan.value.set(1, 1); else if (RB.span) U.refSpan.value.set(RB.span[0], RB.span[1]);
     const hi = new Uint8Array(64 * 32 * 4), lo = new Uint8Array(64 * 32 * 4);
     U.modoLum.value = 2; this.r.setRenderTarget(this.rtLoc); this.r.render(this.cena, this.cam); this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, hi);
     U.modoLum.value = 3; this.r.render(this.cena, this.cam); this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, lo);
     U.modoLum.value = 0; this.r.setRenderTarget(null); U.wb.value.copy(wb0); U.expo.value = ex0;
+    for (let i = 0; i < 7; i++) U.g.value[i].copy(g0[i]);
+    U.gDir.value.copy(d0);
     const px = (k) => [0, 1, 2].map((c) => 2 ** ((hi[k * 4 + c] + lo[k * 4 + c] / 255) / 255 * 20 - 16));
     if (chave) {
       if (!this._mascara) { const b = atob(RB.mascara); this._mascara = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) this._mascara[i] = b.charCodeAt(i); }
@@ -881,6 +1026,14 @@ void main(){
 // sRGB), the wall reads: DAY 205/255 with a partial (0.6) white balance; NIGHT the suite's approved white (175, 135, 97). Twilight blends
 // the two (geometric, by kDia). '?semref' turns it off (old auto exposure). The previews (expoe_previas.py) use the same rule.
 const REF_DIA = 205, REF_NOITE = [175, 135, 97];
+// 09/11 VISOR-LUZ defaults (manifest cena.ombroNoite / noiteFundo / solDiretoMax / solDiretoSat override them)
+// 18/11: FUNDO_NOITE 44 -> 0. The 09/11 floor lifted the all-off night to a uniform grey (0.40-0.47 of the lit room, a third of
+// midday), which reads as an overcast afternoon. At 0 the all-off room keeps only the night sky through the glass (ceuMinLux
+// floor per point): dark, furniture as silhouettes against the window, the same behaviour as the Upper tour. The montador's
+// --confere refuses a template or manifest with a positive night floor.
+const OMBRO_DIA = 0.55, OMBRO_NOITE = 0.8, FUNDO_NOITE = 0, FUNDO_SAT = 0.1, FUNDO_CAP = 2.5, FUNDO_TINTA = [1.02, 1.0, 0.97], SOL_MAX = 6, SOL_ALTO_K = 0.6, SOL_ALTO_P = 0.3, DIA_EV = -0.25, SAT_SOL = 0.9, CONTR_DIA = 1.1, CONTR_NOITE = 1;
+// highlight curve [knee, power, knee width]: above the knee the scene ratio r becomes r^power
+const ALTO_DIA = [0.18, 0.22, 0.3], ALTO_NOITE = [0.15, 0.35, 0.3], TELA_ALTO = { k: 0, p: 1, s: 0.3 };
 const lumJ = (v) => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
 function neutralJ(c) {
   const st = 0.76, ds = 0.15; let x = Math.min(c[0], c[1], c[2]); const off = x < 0.08 ? x - 6.25 * x * x : 0.04; c = c.map((v) => v - off);
@@ -888,30 +1041,32 @@ function neutralJ(c) {
   const d = 1 - st, np = 1 - d * d / (pk + d - st); c = c.map((v) => v * np / pk); const gg = 1 - 1 / (ds * (pk - np) + 1);
   return c.map((v) => v * (1 - gg) + np * gg);
 }
-function telaJ(x, ombro) {
+function telaJ(x, ombro, contr = 1) {
+  if (contr !== 1) { const l0 = lumJ(x), kc = (Math.max(l0, 1e-6) / 0.18) ** (contr - 1); x = x.map((v) => v * kc); }
+  if (TELA_ALTO.k > 0 && TELA_ALTO.p < 1) { const lA = lumJ(x); if (lA > TELA_ALTO.k) { const T = TELA_ALTO, u = Math.log(lA / T.k), kA = T.k * Math.exp(u * T.p + (1 - T.p) * T.s * (1 - Math.exp(-u / T.s))) / lA; x = x.map((v) => v * kA); } }
   const l = lumJ(x), k = (1 + 1 / ombro) / (1 + l / ombro); let o = neutralJ(x.map((v) => v * k));
   { const m = Math.max(o[0], o[1], o[2]); let t = Math.min(1, Math.max(0, (m - 0.85) / 0.15)); t = t * t * (3 - 2 * t); o = o.map((v) => v + (m - v) * t); }
   return o.map((v) => { v = Math.max(v, 0); return Math.min(255, (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055) * 255); });
 }
-function exPara(r, wb, alvoL, ombro) {
+function exPara(r, wb, alvoL, ombro, contr = 1) {
   let lo = -12, hi = 12;
-  for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2, v = lumJ(telaJ(r.map((c, k) => c * wb[k] * 2 ** m), ombro)); if (v < alvoL) lo = m; else hi = m; }
+  for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2, v = lumJ(telaJ(r.map((c, k) => c * wb[k] * 2 ** m), ombro, contr)); if (v < alvoL) lo = m; else hi = m; }
   return 2 ** ((lo + hi) / 2);
 }
-function regraRef(r, kDia, ombro, RB = {}) {   // v2 28/10 (re-audit 3 G1): targets + per-mode EV cut from the manifest (expoe_previas.py)
+function regraRef(r, kDia, ombro, RB = {}, contr = 1) {   // v2 28/10 (re-audit 3 G1): targets + per-mode EV cut from the manifest (expoe_previas.py)
   const ALD = RB.alvo_dia ? lumJ(RB.alvo_dia) : REF_DIA, ALN = RB.alvo_noite || REF_NOITE, AJ = RB.ajuste_ev || {};
   const Y = lumJ(r);
   let wbD = r.map((c) => (Y / Math.max(c, 1e-9)) ** 0.6); const nD = lumJ(wbD); wbD = wbD.map((w) => w / nD);
-  const exD = exPara(r, wbD, ALD, ombro);
+  const exD = exPara(r, wbD, ALD, ombro, contr);
   let wbN = [1, 1, 1], exN = 1;
   for (let it = 0; it < 8; it++) {
-    exN = exPara(r, wbN, lumJ(ALN), ombro); const cur = telaJ(r.map((c, k) => c * wbN[k] * exN), ombro);
+    exN = exPara(r, wbN, lumJ(ALN), ombro, contr); const cur = telaJ(r.map((c, k) => c * wbN[k] * exN), ombro, contr);
     wbN = wbN.map((w, k) => w * (Math.max(ALN[k], 1) / Math.max(cur[k], 1)) ** 2.2); const n = lumJ(wbN); wbN = wbN.map((w) => w / n);
   }
-  exN = exPara(r, wbN, lumJ(ALN), ombro);
+  exN = exPara(r, wbN, lumJ(ALN), ombro, contr);
   const aj = (AJ.noite || 0) * (1 - kDia) + (AJ.dia || 0) * kDia;   // cross-point clamp, measured offline (no point > +1 EV over P2)
   const wb = wbN.map((w, k) => w ** (1 - kDia) * wbD[k] ** kDia), ex = exN ** (1 - kDia) * exD ** kDia * 2 ** aj;
-  return { wb, ex, leitura: telaJ(r.map((c, k) => c * wb[k] * ex), ombro).map(Math.round) };
+  return { wb, ex, leitura: telaJ(r.map((c, k) => c * wb[k] * ex), ombro, contr).map(Math.round) };
 }
 let ALVO = 0.3;
 function definirAlvo(x) {

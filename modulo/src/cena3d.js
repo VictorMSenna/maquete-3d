@@ -126,7 +126,28 @@ function criarCena({
   ceuCv.height = 256;
   const ceuTex = new THREE.CanvasTexture(ceuCv);
   ceuTex.colorSpace = THREE.SRGBColorSpace;
+  // Sky dome by view direction (zenith = top colour, horizon = horizon colour; the old background was a screen-space gradient).
+  // The far city fades into the fog colour, which is the horizon colour, so the two now meet without a band (at 17:30 the fogged
+  // far tiles made a flat peach strip under the blue screen-space sky). The physical sky (ceuFisico) still blends over it.
+  const uDomo = { uTopo: { value: new THREE.Color("#3a5f8c") }, uHoriz: { value: new THREE.Color("#c9cfcc") } };
+  const ceuDomo = new THREE.Mesh(new THREE.SphereGeometry(3000, 48, 24), new THREE.ShaderMaterial({
+    uniforms: uDomo,
+    vertexShader: "varying vec3 vD; void main() { vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+    fragmentShader: `uniform vec3 uTopo; uniform vec3 uHoriz; varying vec3 vD;
+      void main() { float y = clamp(normalize(vD).y, 0.0, 1.0); gl_FragColor = vec4(mix(uHoriz, uTopo, 1.0 - exp(-7.0 * y)), 1.0);
+      #include <colorspace_fragment>
+      }`,
+    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, toneMapped: false
+  }));
+  ceuDomo.name = "ceu-domo";
+  ceuDomo.renderOrder = -20;
+  ceuDomo.frustumCulled = false;
+  ceuDomo.raycast = () => {
+  };
+  ceuDomo.visible = false;
   function pintarCeu(topo, horiz) {
+    uDomo.uTopo.value.set(topo);
+    uDomo.uHoriz.value.set(horiz);
     const g = ceuCv.getContext("2d");
     const gr = g.createLinearGradient(0, 0, 0, 256);
     gr.addColorStop(0, topo);
@@ -141,6 +162,172 @@ function criarCena({
   scene.environmentIntensity = LUZ.env;
   const hemi = new THREE.HemisphereLight(16777215, 12037534, LUZ.hemi);
   scene.add(hemi);
+  // Redesign 13/11: at night the facade is lit by what is really there, the night sky above and the city's light bounced from the
+  // streets below (warm), so it reads as a lit wall, not a black block. Off by day; follows the night factor in setSol. It is a
+  // hemisphere term added only to the tower's own materials (luzCidadeNoPredio), so the fallback city and the ground keep their light.
+  const LUZ_CIDADE = +(/[?&]luzCidade=([\d.]+)/.exec(location.search) || [0, 3.0])[1];
+  // 14/11: the street bounce nearer a neutral warm white (the city's LED street lights); the old brown made the stone maroon
+  const COR_CID = { ceu: new THREE.Color("#3e4554"), chao: new THREE.Color("#6a6258") };
+  const uCid = { uCidCeu: { value: new THREE.Color(0) }, uCidChao: { value: new THREE.Color(0) } };
+  const luzCidade = { set intensity(k) { uCid.uCidCeu.value.copy(COR_CID.ceu).multiplyScalar(k); uCid.uCidChao.value.copy(COR_CID.chao).multiplyScalar(k); } };
+  // Sky colours seen in the glass (unit panes by day, lit/dark panes at night); set in setSol.
+  const uJan = { uCeuH: { value: new THREE.Color("#1d2945") }, uCeuT: { value: new THREE.Color("#0f1730") } };
+  // Surface of the real building (drone photo vista-frente): light stone cladding in panels (3 rows per floor, ~1.2 m wide, each
+  // panel a slightly different tone), the brick spine and crown in small courses, and the unit glass reflecting the sky.
+  // Every line is filtered by its screen size, so far away it melts into the average colour (no shimmer, no stripes).
+  const LAJE_P = FORMA.niveis.lajes[1] - FORMA.niveis.lajes[0];
+  const CEU_DIA = +(/[?&]ceuDia=([\d.]+)/.exec(location.search) || [0, 1.0])[1];
+  const PREENCHE = +(/[?&]preenche=([\d.]+)/.exec(location.search) || [0, 1.0])[1]; // ?preenche= (tests): day sky + street bounce on the tower
+  const TIPO_SUP = (nome) => /branco|pedra|embasamento|bege/.test(nome) ? 1 : /tijolo|cornija/.test(nome) ? 2 : nome === "predio-unidades" ? 3 : nome === "predio-vidro" ? 4 : nome === "predio-janela" || nome === "predio-det-janela" ? 5 : 0;
+  const SUP_GLSL = `
+    float hS(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+    // joint line box-filtered by the pixel footprint (14/11): a joint narrower than a pixel still darkens it by its coverage, so the
+    // panel grid of the photo reads at the showcase zoom; many joints per pixel fade to the average tone
+    float juntaS(float x, float w) { float d = abs(fract(x + 0.5) - 0.5); float f = max(fwidth(x), 1e-4); float c = clamp((min(d + 0.5 * f, w) - max(d - 0.5 * f, -w)) / f, 0.0, 1.0); return c * (1.0 - smoothstep(0.25, 0.5, f)); }
+    float fadeS(float x) { return 1.0 - smoothstep(0.15, 0.45, fwidth(x)); }`;
+  // Light of a lit unit on its own balcony (redesign 14/11, correcao-3d): at night a lit room lights the balcony in front of its
+  // glass, the floor most, the slab soffit above and the inner face of the railing less, fading with the distance from the glass.
+  // No new light source: it is the unit's own light, the one the page sells ("each lit window is a unit for sale"); dark units give
+  // nothing. Level per (final, floor) in a 9 x 14 texture filled in pintar(); the balcony zone and glass plane of each final come
+  // from FORMA.finais.
+  const LUZ_U = new Float32Array(9 * 14);
+  const texLuzU = new THREE.DataTexture(LUZ_U, 9, 14, THREE.RedFormat, THREE.FloatType);
+  texLuzU.needsUpdate = true;
+  const FIN_R = [], FIN_P = [];
+  for (let f = 1; f <= 9; f++) {
+    const d = FORMA.finais[f], xz = d ? d.xz : [0, 0, 0, 0], s = d ? d.sacada : {};
+    let r = [0, 0, -1, -1], pl = [0, 0, 1, 0];
+    if (d && d.face === "rua") { r = [s.x - 0.1, s.z0, xz[2], s.z1]; pl = [0, xz[0], -1, 0]; }
+    else if (d && d.face === "norte") { r = [s.x0, s.z - 0.1, s.x1, xz[3]]; pl = [1, xz[1], -1, 0]; }
+    else if (d && d.face === "sul") { r = [s.x0, xz[1], s.x1, s.z + 0.1]; pl = [1, xz[3], 1, 0]; }
+    else if (d && d.face === "leste") { r = [xz[0], s.z0, s.x + 0.1, s.z1]; pl = [0, xz[2], 1, 0]; }
+    FIN_R.push(new THREE.Vector4(...r));
+    FIN_P.push(new THREE.Vector4(...pl));
+  }
+  const uLuzU = { uLuzU: { value: texLuzU }, uSpill: { value: 0 }, uFinR: { value: FIN_R }, uFinP: { value: FIN_P }, uLaje1: { value: FORMA.niveis.lajes[0] } };
+  const comLuzCidade = new WeakSet();
+  function luzCidadeNoPredio(grupo) {
+    grupo.traverse((o) => {
+      if (!o.isMesh) return;
+      const tipo = TIPO_SUP(o.name);
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m || !m.isMeshStandardMaterial || comLuzCidade.has(m)) continue;
+        comLuzCidade.add(m);
+        const antes = m.onBeforeCompile, chave = m.customProgramCacheKey;
+        m.onBeforeCompile = (sh, r) => {
+          if (antes) antes.call(m, sh, r);
+          Object.assign(sh.uniforms, uCid, uJan, uLuzU, { uLajeP: { value: LAJE_P } });
+          sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vWpS; varying vec3 vWnS; varying vec2 vUvS; varying float vIdS;").replace("#include <project_vertex>", `#include <project_vertex>
+            {
+              vUvS = uv;
+              #ifdef USE_INSTANCING
+                vIdS = float(gl_InstanceID);
+              #endif
+              mat4 mS = modelMatrix;
+              #ifdef USE_INSTANCING
+                mS = modelMatrix * instanceMatrix;
+              #endif
+              vWpS = (mS * vec4(transformed, 1.0)).xyz;
+              vWnS = normalize(mat3(mS) * objectNormal);
+            }`);
+          sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform vec3 uCidCeu; uniform vec3 uCidChao; uniform vec3 uCeuH; uniform vec3 uCeuT; uniform float uLajeP;\nuniform sampler2D uLuzU; uniform float uSpill; uniform vec4 uFinR[9]; uniform vec4 uFinP[9]; uniform float uLaje1;\nvarying vec3 vWpS; varying vec3 vWnS; varying vec2 vUvS; varying float vIdS;" + SUP_GLSL).replace("#include <lights_fragment_end>", `#include <lights_fragment_end>
+            {
+              float nyC = inverseTransformDirection(normal, viewMatrix).y;
+              float hC = vWpS.y;
+              // the street light reaches the lower floors more than the crown; the sky lights the tops of slabs and ledges
+              vec3 chaoC = uCidChao * mix(1.45, 0.55, smoothstep(4.0, 55.0, hC));
+              // the low floors see less open sky than the crown (neighbours): a gentle gradient, as on the photo
+              reflectedLight.indirectDiffuse += BRDF_Lambert(material.diffuseColor) * mix(chaoC, uCidCeu * mix(0.78, 1.0, smoothstep(0.0, 45.0, hC)), 0.5 * nyC + 0.5);
+              ${tipo === 3 ? "" : `if (uSpill > 0.0) {
+                float kA = floor((vWpS.y - uLaje1 + 0.1) / uLajeP);
+                if (kA >= 0.0 && kA < 14.0) {
+                  for (int i = 0; i < 9; i++) {
+                    vec4 rU = uFinR[i];
+                    if (vWpS.x < rU.x || vWpS.x > rU.z || vWpS.z < rU.y || vWpS.z > rU.w) continue;
+                    vec4 pU = uFinP[i];
+                    float dU = pU.z * ((pU.x < 0.5 ? vWpS.x : vWpS.z) - pU.y);
+                    if (dU < -0.05) break;
+                    float lvU = texelFetch(uLuzU, ivec2(i, int(kA)), 0).r;
+                    vec3 nU = normalize(vWnS), foraU = pU.x < 0.5 ? vec3(pU.z, 0.0, 0.0) : vec3(0.0, 0.0, pU.z);
+                    float facU = nU.y > 0.5 ? 0.9 : nU.y < -0.5 ? 0.4 : 0.15 + 0.8 * clamp(-dot(nU, foraU), 0.0, 1.0);
+                    reflectedLight.indirectDiffuse += BRDF_Lambert(material.diffuseColor) * vec3(1.0, 0.70, 0.42) * (lvU * uSpill * facU * exp(-max(dU, 0.0) / 1.1));
+                    break;
+                  }
+                }
+              }`}
+            }`);
+          if (tipo === 1 || tipo === 2) {
+            // 14/11: hooked before roughnessmap_fragment, i.e. after the atlas patch (predio-textura.js) has set the clean colour in
+            // its color_fragment; hooked on color_fragment the joints and panel tones were overwritten and never showed
+            sh.fragmentShader = sh.fragmentShader.replace("#include <roughnessmap_fragment>", `
+            {
+              vec3 nA = abs(vWnS);
+              float uS = nA.x > nA.z ? vWpS.z : vWpS.x;
+              if (nA.y > 0.5) uS = vWpS.x;
+              ${tipo === 1 ? /embasamento/.test(o.name) ? `
+              float vS = vWpS.y / (uLajeP / 3.0), uP = uS / 1.2;
+              vec2 cel = vec2(floor(uP), floor(vS));
+              float tom = mix(1.0, 0.95 + 0.07 * hS(cel + floor(vWnS.xz * 3.0) * 7.0), fadeS(vS));
+              float jnt = max(juntaS(vS, 0.008), juntaS(uP, 0.006)) * step(nA.y, 0.5);
+              diffuseColor.rgb *= tom * (1.0 - 0.4 * jnt);` : `
+              // tower walls (14/11, read on the photo's stone column): one panel row per floor with the joint at the slab line,
+              // tall panels ~1.8 m wide, a small tone change from panel to panel
+              float vS = (vWpS.y - uLaje1) / uLajeP, uP = uS / 1.8;
+              vec2 cel = vec2(floor(uP), floor(vS));
+              float tom = mix(1.0, 0.96 + 0.06 * hS(cel + floor(vWnS.xz * 3.0) * 7.0), fadeS(uP));
+              float jnt = max(juntaS(vS, 0.004), juntaS(uP, 0.0045)) * step(nA.y, 0.5);
+              diffuseColor.rgb *= tom * (1.0 - 0.45 * jnt);` : `
+              float vS = vWpS.y / 0.086, uP = uS / 0.25 + 0.5 * mod(floor(vS), 2.0);
+              float tom = mix(1.0, 0.86 + 0.24 * hS(vec2(floor(uP), floor(vS))), fadeS(vS));
+              float jnt = max(juntaS(vS, 0.09), juntaS(uP, 0.03));
+              diffuseColor.rgb *= tom * (1.0 - 0.22 * jnt);`}
+            }
+            #include <roughnessmap_fragment>`);
+          }
+          if (tipo === 3) {
+            // unit pane: the sky reflected by Fresnel on the glass (not on the frame), day and dusk
+            sh.fragmentShader = sh.fragmentShader.replace("#include <opaque_fragment>", `{
+              vec2 qG = vUvS;
+              float bG = step(qG.x, 0.018) + step(0.982, qG.x) + step(qG.y, 0.03) + step(0.97, qG.y);
+              float vidroG = 1.0 - clamp(bG, 0.0, 1.0);
+              ${/[?&](modo=vitrine|soPredio=1)/.test(location.search) ? `
+              // showcase / poster by day: the rooms behind the glass, as on the photo (a curtain on some panes, light fabric lit by
+              // the daylight that enters; the other panes stay dark glass). Per unit and per pane, stable.
+              float idC = floor(vIdS + 0.5) * 4.0 + floor(clamp(qG.x, 0.0, 0.999) * 4.0);
+              float hC1 = hS(vec2(idC, 3.7)), hC2 = hS(vec2(idC, 9.1));
+              vec3 corC = mix(vec3(0.62, 0.58, 0.52), vec3(0.52, 0.52, 0.50), hC2) * (0.25 * (uCidCeu + uCidChao) + 0.05) * (0.38 + 0.22 * hS(vec2(idC, 5.3))) * (0.9 + 0.1 * cos(fract(qG.x * 4.0) * 37.7 + hC2 * 6.0));
+              outgoingLight = mix(outgoingLight, corC, step(0.55, hC1) * vidroG * 0.75);` : ""}
+              vec3 VG = normalize(cameraPosition - vWpS);
+              float cG = clamp(abs(dot(normalize(vWnS), VG)), 0.0, 1.0);
+              float frG = 0.06 + 0.6 * pow(1.0 - cG, 4.0);
+              vec3 rG = reflect(-VG, normalize(vWnS));
+              vec3 ceuG = mix(uCeuH, uCeuT, clamp(rG.y * 1.6, 0.0, 1.0));
+              ceuG = mix(ceuG * 0.55, ceuG, smoothstep(-0.05, 0.25, rG.y));
+              outgoingLight = mix(outgoingLight, ceuG, frG * vidroG);
+            }
+            #include <opaque_fragment>`);
+          }
+          if (tipo === 4 || tipo === 5) {
+            // railing glass (4) and the crown / small windows (5), redesign 14/11: the glass reflects the sky more at grazing
+            // angles (and the railing is less see-through there), so it reads as glass, not as a flat tinted box
+            sh.fragmentShader = sh.fragmentShader.replace("#include <opaque_fragment>", `{
+              vec3 VG = normalize(cameraPosition - vWpS), nG = normalize(vWnS);
+              float cG = clamp(abs(dot(nG, VG)), 0.0, 1.0);
+              float frG = ${tipo === 4 ? "0.05 + 0.75" : "0.08 + 0.7"} * pow(1.0 - cG, 4.0);
+              vec3 rG = reflect(-VG, nG * sign(dot(nG, VG)));
+              vec3 ceuG = mix(uCeuH, uCeuT, clamp(rG.y * 1.6, 0.0, 1.0));
+              outgoingLight = mix(outgoingLight, ceuG, frG);
+              ${tipo === 4 ? "diffuseColor.a = mix(diffuseColor.a, 1.0, frG);" : ""}
+            }
+            #include <opaque_fragment>`);
+          }
+        };
+        const k0 = chave ? chave.call(m) : m.uuid;
+        m.customProgramCacheKey = () => k0 + "-cid" + tipo;
+        m.needsUpdate = true;
+      }
+    });
+  }
   const sol = new THREE.DirectionalLight(16774374, LUZ.sol);
   const CENTRO = new THREE.Vector3(CX, 0, CZ);
   const CENTRO_ARCO = CENTRO;
@@ -195,11 +382,18 @@ function criarCena({
   };
   matUnidade.customProgramCacheKey = () => "unidade-e5";
   const { _leia: _m0, ...MAT_ } = PREDIO_CFG.materiais;
+  // Redesign 14/11 (correcao-3d): albedo of the real facade, read on the drone photo vista-frente in the shade (stone panels and slab
+  // bands a neutral light grey ~175 sRGB under sky light, brick of the spine and crown red-brown). The old values were a warm beige
+  // and a near-black brick that read as a brown box next to the Google city.
+  Object.assign(MAT_, { branco: "#cbc8c2", pedra: "#c9c6c0", embasamento: "#bcbbb8", bege: "#a39b8c", tijolo: "#6b443c", cornija: "#4a4644" });
   const PB = construirPredio(THREE, { forma: FORMA, linhas: true, materiais: {
     ...MAT_,
     unidade: matUnidade
   } });
   scene.add(PB.grupo);
+  // Redesign 13/11: no outline on the tower at any hour (the box edges read as a wireframe model; at night they turned light blue).
+  // The selection outlines of a floor / unit stay.
+  if (PB.pecas.linhas) PB.pecas.linhas.visible = false;
   PB.grupo.traverse((o) => {
     if (o.isMesh && o.geometry.attributes.uv && !o.geometry.attributes.uvB) o.geometry.setAttribute("uvB", o.geometry.attributes.uv.clone());
   });
@@ -219,6 +413,117 @@ function criarCena({
       PB.grupo.add(m);
     }
   }
+  // Facade detail of the real building (redesign 14/11, correcao-3d), all read on the drone photo vista-frente and placed from the
+  // measured form (FORMA): a stone band on every balcony slab edge (2 cm proud, a 6 cm curb under the glass), the glass railing's
+  // posts every ~1.35 m and its base shoe, the window frames of every unit front with depth (outer frame, 3 mullions at the same
+  // quarters the pane shader draws, head, sill, transom), the AC condenser on each balcony (seen on nearly every balcony in the
+  // photo), the light stone piers between the north bays (stone in the photo, brick in the old model) and the small high windows
+  // of the street wing's north wall. Separate meshes, so the baked atlas / AO of the original boxes still match their counts.
+  const DET = {};
+  {
+    const N_ = FORMA.niveis, GC_ = N_.guarda_corpo, L_ = N_.lajes, LJ_ = N_.espessura_laje;
+    const add = (k, c) => (DET[k] ||= []).push(c);
+    for (const v of FORMA.varandas) {
+      const [x0, z0, x1, z1] = v.laje;
+      for (const k of v.niveis) {
+        const y = L_[k - 1], yb = y - LJ_ - 0.04, yc = y + 0.06;
+        if (v.guarda === "x0") {
+          add("banda", [x0 - 0.02, yb, z0 - 0.02, x0 + 0.03, yc, z1 + 0.02]);
+          add("banda", [x0 - 0.02, yb, z0 - 0.02, x1, y - LJ_ + 0.02, z0 + 0.03]);
+          add("banda", [x0 - 0.02, yb, z1 - 0.03, x1, y - LJ_ + 0.02, z1 + 0.02]);
+          add("metal", [x0 + 0.02, y, z0 + 0.03, x0 + 0.09, y + 0.09, z1 - 0.03]);
+          const n = Math.max(2, Math.round((z1 - z0) / 1.35));
+          for (let i = 0; i <= n; i++) {
+            const z = z0 + 0.07 + (z1 - z0 - 0.14) * i / n;
+            add("metal", [x0 + 0.025, y, z - 0.022, x0 + 0.085, y + GC_, z + 0.022]);
+          }
+        } else {
+          const f = v.guarda === "z0" ? z0 : z1, s = v.guarda === "z0" ? -1 : 1;
+          const zz = (a, b) => s < 0 ? [f + a, f + b] : [f - b, f - a];
+          const [b0, b1] = zz(-0.02, 0.03);
+          add("banda", [x0 - 0.02, yb, b0, x1 + 0.02, yc, b1]);
+          const [m0, m1] = zz(0.02, 0.09);
+          add("metal", [x0 + 0.03, y, m0, x1 - 0.03, y + 0.09, m1]);
+          const n = Math.max(2, Math.round((x1 - x0) / 1.35));
+          const [p0, p1] = zz(0.028, 0.072);
+          for (let i = 0; i <= n; i++) {
+            const x = x0 + 0.07 + (x1 - x0 - 0.14) * i / n;
+            add("metal", [x - 0.022, y, p0, x + 0.022, y + GC_, p1]);
+          }
+        }
+      }
+    }
+    const comVaranda = new Set(FORMA.varandas.flatMap((v) => v.finais));
+    for (const d of Object.values(FORMA.unidades)) {
+      const c = d.caixa, n = d.normal, eixoX = n[0] !== 0;
+      const face = eixoX ? n[0] < 0 ? c[0] : c[3] : n[2] < 0 ? c[2] : c[5];
+      const sn = eixoX ? n[0] : n[2];
+      const t0 = eixoX ? c[2] : c[0], t1 = eixoX ? c[5] : c[3], y0 = c[1], y1 = c[4], hgt = y1 - y0;
+      const caixa = (a0, a1, yy0, yy1, p0, p1) => {
+        const q0 = face + sn * p0, q1 = face + sn * p1;
+        return eixoX ? [Math.min(q0, q1), yy0, a0, Math.max(q0, q1), yy1, a1] : [a0, yy0, Math.min(q0, q1), a1, yy1, Math.max(q0, q1)];
+      };
+      const W = t1 - t0;
+      add("caixilho", caixa(t0, t0 + 0.08, y0, y1, -0.02, 0.06));
+      add("caixilho", caixa(t1 - 0.08, t1, y0, y1, -0.02, 0.06));
+      for (const q of [0.25, 0.5, 0.75]) add("caixilho", caixa(t0 + W * q - 0.028, t0 + W * q + 0.028, y0, y1, -0.02, 0.05));
+      add("caixilho", caixa(t0, t1, y1 - 0.08, y1, -0.02, 0.06));
+      add("caixilho", caixa(t0, t1, y0, y0 + 0.07, -0.02, 0.06));
+      add("caixilho", caixa(t0, t1, y0 + hgt * 0.86 - 0.025, y0 + hgt * 0.86 + 0.025, -0.02, 0.045));
+      if (comVaranda.has(d.final)) {
+        const fim = d.final % 2 === 0 ? [t1 - 0.95, t1 - 0.15] : [t0 + 0.15, t0 + 0.95];
+        add("ar", caixa(fim[0], fim[1], y0 + 0.02, y0 + 0.6, 0.06, 0.38));
+      }
+    }
+    for (const p of FORMA.pilares || []) {
+      const c = p.caixa;
+      if (c[1] > 12 || c[4] < 40) continue;
+      add("banda", [c[0] - 0.01, c[1], c[2] - 0.01, c[3] + 0.01, c[4], c[5] + 0.01]);
+    }
+    const ow = FORMA.volumes.find((v) => v.id === "ala-oeste-parede-norte");
+    if (ow) for (let k = 1; k <= N_.andares; k++) {
+      const y = L_[k - 1], z = ow.caixa[2];
+      add("janelinha", [6.2, y + 0.95, z - 0.03, 6.68, y + 1.55, z + 0.01]);
+    }
+    // crown windows: the photo shows each tall window split by a centre mullion and two transoms, in a dark frame
+    for (const v of FORMA.volumes) {
+      if (!/^coroa-janela-/.test(v.id)) continue;
+      const [x0, y0, z0, x1, y1, z1] = v.caixa, norte = /norte/.test(v.id);
+      const zf = norte ? z0 : z1, s = norte ? -1 : 1;
+      const zz = [Math.min(zf, zf + s * 0.07), Math.max(zf, zf + s * 0.07)];
+      const xm = (x0 + x1) / 2;
+      add("caixilho", [x0, y0, zz[0], x0 + 0.1, y1, zz[1]]);
+      add("caixilho", [x1 - 0.1, y0, zz[0], x1, y1, zz[1]]);
+      add("caixilho", [xm - 0.05, y0, zz[0], xm + 0.05, y1, zz[1]]);
+      for (const q of [0, 1 / 3, 2 / 3, 1]) {
+        const y = y0 + (y1 - y0) * q;
+        add("caixilho", [x0, Math.max(y0, y - 0.05), zz[0], x1, Math.min(y1, y + 0.05), zz[1]]);
+      }
+    }
+  }
+  {
+    const MATS_DET = {
+      banda: new THREE.MeshStandardMaterial({ color: "#d3d0ca", roughness: 0.82 }),
+      metal: new THREE.MeshStandardMaterial({ color: "#3a3d41", roughness: 0.45, metalness: 0.35 }),
+      caixilho: new THREE.MeshStandardMaterial({ color: "#44484d", roughness: 0.5, metalness: 0.3 }),
+      ar: new THREE.MeshStandardMaterial({ color: "#d8d8d4", roughness: 0.6 }),
+      janelinha: new THREE.MeshStandardMaterial({ color: "#2d343b", roughness: 0.2, metalness: 0.2 })
+    };
+    const NOME_DET = { banda: "predio-det-banda", metal: "predio-det-metal", caixilho: "predio-det-caixilho", ar: "predio-det-ar", janelinha: "predio-det-janela" };
+    for (const [k, lista] of Object.entries(DET)) {
+      const m = new THREE.InstancedMesh(box, MATS_DET[k], lista.length);
+      lista.forEach((c, i) => m.setMatrixAt(i, matrizBox(...c)));
+      m.instanceMatrix.needsUpdate = true;
+      m.computeBoundingSphere();
+      m.castShadow = k !== "janelinha";
+      m.receiveShadow = true;
+      m.raycast = () => {
+      };
+      m.name = NOME_DET[k];
+      PB.grupo.add(m);
+    }
+  }
+  luzCidadeNoPredio(PB.grupo);
   let gradeFn = null;
   let entB7 = { carregado: false, atualizarCamera() {
   }, atualizarSol() {
@@ -305,10 +610,12 @@ function criarCena({
       matUnidNoite.onBeforeCompile = (sh) => {
         fachadaNoite(sh);
         mascara(sh);
+        janelaNoite(sh);
       };
-      matUnidNoite.customProgramCacheKey = () => "unid-noite-fachada-mascara";
+      matUnidNoite.customProgramCacheKey = () => "unid-noite-fachada-mascara-janela";
       matUnidNoite.needsUpdate = true;
     }
+    luzCidadeNoPredio(PB.grupo);
     const v = meshNoite.visible;
     meshNoite.visible = true;
     try {
@@ -436,8 +743,57 @@ function criarCena({
         `);
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying float vFachada;").replace("#include <clipping_planes_fragment>", "#include <clipping_planes_fragment>\n  if (vFachada < 0.5) discard;");
   };
-  matUnidNoite.onBeforeCompile = fachadaNoite;
-  matUnidNoite.customProgramCacheKey = () => "unid-noite-fachada";
+  // Night window (redesign 13/11): the lit pane is no longer one flat status colour. The instance colour still carries the status
+  // level (lit / dim / dark, dimmed by the filter); here it becomes a room seen through glass: warm light that varies a little from
+  // unit to unit (colour temperature, level), brighter toward the ceiling and darker at the floor and the sides, a sheer curtain on
+  // some panes, the frame and mullions dark, and the glass reflecting the sky by Fresnel (dark units = dark glass with reflection).
+  const janelaNoite = (sh) => {
+    Object.assign(sh.uniforms, uJan);
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec2 vUvJ; varying float vSemJ; varying vec3 vNJ; varying vec3 vVJ;").replace("#include <project_vertex>", `#include <project_vertex>
+        vUvJ = uv;
+        vSemJ = float(gl_InstanceID);
+        vec4 wpJ = modelMatrix * instanceMatrix * vec4(position, 1.0);
+        vNJ = normalize(mat3(modelMatrix) * normal);
+        vVJ = cameraPosition - wpJ.xyz;`);
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", `#include <common>
+        varying vec2 vUvJ; varying float vSemJ; varying vec3 vNJ; varying vec3 vVJ;
+        uniform vec3 uCeuH; uniform vec3 uCeuT;
+        float hJ(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+        float linhaJ(float d, float w0) { float w = fwidth(d) * 0.75; return 1.0 - smoothstep(w0 - w, w0 + w, d); }`).replace("#include <opaque_fragment>", `{
+          vec3 base = diffuseColor.rgb;
+          float L = dot(base, vec3(0.2126, 0.7152, 0.0722));
+          float forca = clamp((L - 0.012) / 0.6, 0.0, 1.0);
+          vec2 q = vUvJ;
+          float col = floor(q.x * 4.0);
+          float idJ = floor(vSemJ + 0.5); // the interpolated instance id carries float error; the hash amplified it into grain
+          float s0 = hJ(idJ * 7.13 + 1.0), s1 = hJ(idJ * 3.71 + col * 1.37 + 2.0), s2 = hJ(idJ * 5.31 + col * 2.11 + 3.0);
+          float px = fract(q.x * 4.0);
+          float prof = mix(0.4, 1.0, smoothstep(0.04, 0.78, q.y)) * mix(1.0, 0.8, smoothstep(0.84, 0.99, q.y));
+          prof *= 1.0 - 0.3 * pow(abs(q.x * 2.0 - 1.0), 2.0);
+          float cortina = step(0.58, s1);
+          float dobras = px * 3.0 + s1 * 5.0;
+          float fd = clamp(1.0 - fwidth(dobras) * 1.5, 0.0, 1.0);
+          float tecido = mix(1.0, (0.62 + 0.18 * s2) * (1.0 - 0.12 * fd * (0.5 + 0.5 * cos(dobras * 6.2832))), cortina);
+          // redesign 14/11: a warm white room (2700-3200 K), brighter, so the lit units are the brightest point of the night frame
+          vec3 quente = mix(vec3(1.0, 0.70, 0.42), vec3(1.0, 0.80, 0.58), s0);
+          vec3 interior = quente * 1.25 * forca * prof * tecido * (0.82 + 0.18 * s2);
+          vec3 V = normalize(vVJ);
+          float fres = 0.05 + 0.75 * pow(1.0 - clamp(abs(dot(normalize(vNJ), V)), 0.0, 1.0), 4.0);
+          vec3 ceuR = mix(uCeuH, uCeuT, clamp(0.5 - V.y * 2.0, 0.0, 1.0));
+          vec3 vidro = mix(vec3(0.010, 0.013, 0.018), ceuR * 0.8, fres);
+          float borda = clamp(linhaJ(q.x, 0.018) + linhaJ(1.0 - q.x, 0.018) + linhaJ(q.y, 0.03) + linhaJ(1.0 - q.y, 0.03), 0.0, 1.0);
+          float mul = linhaJ(abs(fract(q.x * 4.0 + 0.5) - 0.5) / 4.0, 0.006);
+          float tr = linhaJ(abs(q.y - 0.86), 0.008);
+          float quadro = clamp(borda + mul + tr, 0.0, 1.0);
+          outgoingLight = mix(interior + vidro * (1.0 - 0.55 * forca), vec3(0.018, 0.019, 0.021) + ceuR * 0.06, quadro);
+        }
+        #include <opaque_fragment>`);
+  };
+  matUnidNoite.onBeforeCompile = (sh) => {
+    fachadaNoite(sh);
+    janelaNoite(sh);
+  };
+  matUnidNoite.customProgramCacheKey = () => "unid-noite-fachada-janela";
   const boxNoite = box.clone();
   const faceArr = new Float32Array(unidades.length * 3);
   unidades.forEach((u, i) => {
@@ -446,17 +802,25 @@ function criarCena({
   });
   boxNoite.setAttribute("aFace", new THREE.InstancedBufferAttribute(faceArr, 3));
   const meshNoite = new THREE.InstancedMesh(boxNoite, matUnidNoite, unidades.length);
-  unidadeBox.forEach((b, i) => meshNoite.setMatrixAt(inst[i], matrizBox(...b)));
+  // 2 cm proud of the pane: with the same box the lit pane z-fought the day pane (grain over the light at a distance)
+  const INF_N = 0.02;
+  unidadeBox.forEach((b, i) => meshNoite.setMatrixAt(inst[i], matrizBox(b[0] - INF_N, b[1], b[2] - INF_N, b[3] + INF_N, b[4], b[5] + INF_N)));
   meshNoite.visible = false;
   meshNoite.raycast = () => {
   };
   scene.add(meshNoite);
+  // Showcase (?modo=vitrine, no legend on screen): by day the panes are glass, not the status colour of the legend; the status
+  // shows at night as it always did (lit / dim / dark). The full viewer keeps the legend colours.
+  const VITRINE = /[?&](modo=vitrine|soPredio=1)/.test(location.search); // the poster has no legend either
+  const LUM_ACESA = Math.max(1e-3, 0.2126 * corNoite.disponivel.r + 0.7152 * corNoite.disponivel.g + 0.0722 * corNoite.disponivel.b);
+  const SPILL = +(/[?&]spill=([\d.]+)/.exec(location.search) || [0, 3.0])[1]; // ?spill= (tests): strength of a lit unit on its balcony
+  const vidroDia = new THREE.Color("#3a4a52");
   function pintar() {
     const luzes = solEstado.luzes || 0;
     unidades.forEach((u, i) => {
       const foraFiltro = estado.filtro && !estado.filtro(u);
       const foraAndar = estado.andar != null && u.andar !== estado.andar;
-      cTmp.copy(u.situacao === "indisponivel" ? corIndisp : corStatus[u.situacao]);
+      cTmp.copy(VITRINE ? vidroDia : u.situacao === "indisponivel" ? corIndisp : corStatus[u.situacao]);
       if (solEstado.flags && solEstado.flags[i] === 0) cTmp.multiplyScalar(0.58);
       if (foraFiltro) cTmp.lerp(tema.fundo, 0.8);
       else if (foraAndar) cTmp.lerp(tema.fundo, 0.45);
@@ -465,7 +829,11 @@ function criarCena({
       if (foraFiltro) cTmp.lerp(fundoNoite, 0.78);
       else if (foraAndar) cTmp.lerp(fundoNoite, 0.5);
       meshNoite.setColorAt(inst[i], cTmp);
+      const fu = FORMA.unidades[u.id];
+      if (fu && fu.andar >= 1 && fu.andar <= 14 && fu.final >= 1 && fu.final <= 9) LUZ_U[(fu.andar - 1) * 9 + fu.final - 1] = Math.min(1, (0.2126 * cTmp.r + 0.7152 * cTmp.g + 0.0722 * cTmp.b) / LUM_ACESA);
     });
+    texLuzU.needsUpdate = true;
+    uLuzU.uSpill.value = SPILL * luzes;
     meshUnid.instanceColor.needsUpdate = true;
     meshNoite.instanceColor.needsUpdate = true;
     meshUnid.visible = true;
@@ -473,7 +841,7 @@ function criarCena({
     matUnidNoite.opacity = luzes;
     if (meshListras) {
       meshListras.material.opacity = (estado.andar != null ? 0.6 : 1) * (1 - luzes);
-      meshListras.visible = luzes < 0.99;
+      meshListras.visible = luzes < 0.99 && !VITRINE;
     }
     pedirRender();
   }
@@ -651,6 +1019,7 @@ function criarCena({
     });
   }
   const ceuFisico = new Sky();
+  const SO_PREDIO = /[?&]soPredio=1/.test(location.search);
   ceuFisico.scale.setScalar(3e3);
   ceuFisico.frustumCulled = false;
   ceuFisico.renderOrder = -100;
@@ -677,6 +1046,7 @@ function criarCena({
   }
   ceuFisico.visible = false;
   scene.add(ceuFisico);
+  scene.add(ceuDomo);
   let b7SoSombra = false;
   function objsB7() {
     const l = [];
@@ -818,6 +1188,7 @@ function criarCena({
   matSombraG.polygonOffsetUnits = -1;
   function render() {
     if (ceuFisico.visible) ceuFisico.position.copy(camera.position);
+    if (ceuDomo.visible) ceuDomo.position.copy(camera.position);
     seguirCamera();
     rotulosForaDosBotoes();
     entB7.atualizarCamera(camera);
@@ -837,6 +1208,8 @@ function criarCena({
       if (entorno) entorno.visible = false;
       if (entornoFantasma) entornoFantasma.visible = false;
     } else if (b7SoSombra) voltaB7();
+    // ?soPredio=1 (poster render): only the tower, its lit panes, the module's own sky and the lights; no city, no ground
+    if (SO_PREDIO) for (const o of scene.children) o.visible = o === PB.grupo || o === meshNoite || o === ceuFisico || o === ceuDomo || !!o.isLight || o === sol.target;
     if (usaGoogle) {
       if (!sol.shadow.camera.layers.isEnabled(2)) {
         sol.shadow.camera.layers.enable(1);
@@ -960,6 +1333,13 @@ function criarCena({
   window.addEventListener("pointerup", soltouPonteiro);
   window.addEventListener("pointercancel", soltouPonteiro);
   window.addEventListener("blur", soltouPonteiro);
+  // Arrasto no iPhone (paralelo-1511): embedded, the canvas is touch-action pan-y, so a vertical swipe is the page scroll; the first
+  // pointermoves still reach camera-controls before the browser takes the gesture (pointercancel) and tilted the building (+17 deg
+  // with Chrome touch, 390). On a touch pointercancel the camera returns to its pose at pointerdown, as the tour does (tour360.js).
+  let poseToque = null;
+  canvas.addEventListener("pointerdown", (e) => { poseToque = e.pointerType === "touch" ? [controls.azimuthAngle, controls.polarAngle] : null; }, true);
+  canvas.addEventListener("pointercancel", (e) => { if (e.pointerType === "touch" && poseToque) controls.rotateTo(poseToque[0], poseToque[1], false); poseToque = null; });
+  window.addEventListener("pointerup", () => { poseToque = null; });
   const desloc = { x: 0, y: 0 };
   function aplicarDesloc() {
     const x = Math.min(desloc.x, largura * 0.6);
@@ -1141,28 +1521,63 @@ function criarCena({
   };
   arco.add(arcoFantasma, marcasHora);
   const rotulosHora = [];
-  function rotuloHora(txt) {
-    const cv = document.createElement("canvas");
-    cv.width = 128;
-    cv.height = 64;
-    const g = cv.getContext("2d");
-    g.font = "700 42px Archivo, system-ui, sans-serif";
+  // Redesign 15/11 (janelas-cidade-2): the hour labels of the sun arc are drawn at the screen's device pixels and keep a fixed size on
+  // screen: digit height = the old size clamped to ROT_TINTA CSS px (with the h and the outline the label stays <= 16 CSS px), whatever the lens zoom (the old 128 x 64 bitmap grew with the
+  // camera zoom, blurred, and covered the city in a city zoom). Redrawn only when the target size or the pixel ratio changes.
+  const ROT_TINTA = [10, 12];
+  window.__g3dRotulos = rotulosHora;
+  function desenhaRotulo(sp, tintaCss, dpr) {
+    const chave = Math.round(tintaCss * dpr * 4);
+    if (sp.userData.chave === chave) return;
+    sp.userData.chave = chave;
+    const fonte = tintaCss / 0.72, cssH = Math.ceil(fonte * 1.45), txt = sp.userData.txt;
+    const cv = sp.material.map.image, g = cv.getContext("2d");
+    const fontStr = (px) => `700 ${px}px Archivo, system-ui, sans-serif`;
+    g.font = fontStr(fonte);
+    const cssW = Math.ceil(g.measureText(txt).width + fonte * 0.5);
+    cv.width = Math.max(2, Math.round(cssW * dpr));
+    cv.height = Math.max(2, Math.round(cssH * dpr));
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.font = fontStr(fonte);
     g.textAlign = "center";
     g.textBaseline = "middle";
-    g.lineWidth = 8;
+    g.lineJoin = "round";
+    g.lineWidth = fonte * 0.19;
     g.strokeStyle = "rgba(16,18,17,.8)";
-    g.strokeText(txt, 64, 33);
+    g.strokeText(txt, cssW / 2, cssH / 2 + fonte * 0.03);
     g.fillStyle = "#f4c45a";
-    g.fillText(txt, 64, 33);
+    g.fillText(txt, cssW / 2, cssH / 2 + fonte * 0.03);
+    sp.material.map.dispose();
+    sp.material.map.needsUpdate = true;
+    sp.userData.css = [cssW, cssH];
+  }
+  function rotuloHora(txt) {
+    const cv = document.createElement("canvas");
     const tex = new THREE.CanvasTexture(cv);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true, sizeAttenuation: false, toneMapped: false, fog: false }));
-    const e = largura < altura ? 0.11 : 0.06;
-    sp.scale.set(e, e / 2, 1);
+    sp.userData.txt = txt;
     sp.renderOrder = 5;
     sp.raycast = () => {
     };
+    tamanhoRotulo(sp, camera.projectionMatrix.elements[5] * altura / 2);
+    // sized again with the projection of the frame being drawn (a lens zoom updates the projection after the label pass of render())
+    sp.onBeforeRender = (r, s, cam) => {
+      tamanhoRotulo(sp, cam.projectionMatrix.elements[5] * altura / 2);
+      sp.updateMatrixWorld();
+    };
     return sp;
+  }
+  function tamanhoRotulo(sp, k) {
+    const e = largura < altura ? 0.11 : 0.06;
+    const tinta = THREE.MathUtils.clamp(e * 0.5 * k * 0.47, ROT_TINTA[0], ROT_TINTA[1]);
+    desenhaRotulo(sp, tinta, renderer.getPixelRatio());
+    const [w, h] = sp.userData.css;
+    sp.scale.set(w / k, h / k, 1);
+    sp.material.opacity = 1 - 0.35 * (solEstado.noite || 0);
   }
   const SELETORES_SOBRE = [".topo .marca-nome", ".topo .legenda", "#btn-foto-real", "#btn-lista", "#btn-legal", "#sol-painel", ".linha-legal"];
   const SELETORES_SOBRE_BORDA = [".topo .marca", ".barra"];
@@ -1189,13 +1604,14 @@ function criarCena({
     if (performance.now() - rectsT > 250) lerRectsSobre();
     const k = camera.projectionMatrix.elements[5] * altura / 2;
     for (const sp of rotulosHora) {
+      tamanhoRotulo(sp, k);
       vRot.copy(sp.position).add(arco.position).project(camera);
       if (vRot.z > 1) {
         sp.visible = false;
         continue;
       }
       const x = (vRot.x * 0.5 + 0.5) * largura, y = (-vRot.y * 0.5 + 0.5) * altura;
-      const hw = sp.scale.x * k * 0.32, hh = sp.scale.y * k * 0.36;
+      const hw = sp.scale.x * k * 0.45, hh = sp.scale.y * k * 0.4;
       sp.visible = x - hw >= 0 && x + hw <= largura && y - hh >= 0 && y + hh <= altura && !rectsSobre.some(([x0, y0, x1, y1]) => x + hw > x0 && x - hw < x1 && y + hh > y0 && y - hh < y1);
     }
   }
@@ -1584,6 +2000,7 @@ function criarCena({
     } else disco.visible = false;
     solEstado.ultimo = { az: i.az, el: i.el, t: i.t };
     ceuFisico.visible = true;
+    ceuDomo.visible = true;
     ceuFisico.material.uniforms.sunPosition.value.copy(direcao(i.az, i.el));
     ceuFisico.material.uniforms.uAlfa.value = smooth(-8, 6, i.el);
     entB7.atualizarSol({ el: i.el, t: i.t, az: i.az, est: i.est });
@@ -1603,7 +2020,9 @@ function criarCena({
     const flagsAntes = solEstado.flags;
     solEstado.flags = solEstado.modo === "pre" ? flags : null;
     const mudouFlags = solEstado.modo === "pre" && String(flagsAntes) !== String(solEstado.flags);
-    scene.environmentIntensity = 0.3 + (LUZ.env - 0.3) * dia;
+    // The studio environment map has bright light panels: at night it lit one face of the tower like a floodlight (a light that is
+    // not there). It fades out with the night; the facade then gets only the sky and the city's bounce (luzCidade).
+    scene.environmentIntensity = (0.3 + (LUZ.env - 0.3) * dia) * (1 - 0.94 * i.noite);
     hemi.intensity = 0.5 + (LUZ.hemi - 0.5) * dia;
     hemi.color.set(16777215).lerp(cTemp.set("#9fb4e0"), i.noite);
     hemi.groundColor.set(12037534).lerp(cTemp.set("#3a4458"), i.noite);
@@ -1618,6 +2037,21 @@ function criarCena({
     }
     const ceu = corCeu(i.el);
     pintarCeu(ceu.topo, ceu.horizonte);
+    uJan.uCeuH.value.set(ceu.horizonte);
+    uJan.uCeuT.value.set(ceu.topo);
+    luzCidade.intensity = LUZ_CIDADE * i.noite;
+    // plus the sky dome itself (radiance of the horizon colour, x pi for irradiance): it lights the facade in the shade by day (the
+    // studio environment alone left the shaded face near black beside the sunlit photo city) and keeps lighting it at dusk
+    // (14/11: half desaturated; the full peach / violet horizon tinted the whole tower salmon at 17:30 and mauve at 21:00)
+    cTemp.set(ceu.horizonte).convertSRGBToLinear();
+    cTemp.lerp(new THREE.Color().setScalar(0.2126 * cTemp.r + 0.7152 * cTemp.g + 0.0722 * cTemp.b), 0.5);
+    uCid.uCidCeu.value.add(cTemp.multiplyScalar(Math.PI * 0.8 * (i.noite + CEU_DIA * dia)));
+    // day fill on the tower (redesign 14/11, correcao-3d): the open sky and the light bounced by the sunlit street and roofs. Target =
+    // the drone photo, where the facade in the shade reads ~175 sRGB (light stone); with the sky term alone it read ~115 and the
+    // tower was the dullest object beside the photo-lit Google city. Tower materials only.
+    const fDia = dia * smooth(-3, 12, i.el) * PREENCHE;
+    uCid.uCidCeu.value.add(cTemp.setRGB(0.8, 0.87, 1.0).multiplyScalar(1.0 * fDia));
+    uCid.uCidChao.value.add(cTemp.setRGB(1.0, 0.96, 0.91).multiplyScalar((0.9 + 1.1 * forcaSolDireto(i.el)) * fDia));
     scene.background = ceuTex;
     scene.fog.color.set(ceu.horizonte);
     matChao.color.copy(tema.chao).lerp(cTemp.set("#2a3448"), i.noite);
@@ -1646,11 +2080,13 @@ function criarCena({
     if (mudouFlags || luzesAntes > 0.01 !== solEstado.luzes > 0.01) pintar();
     else {
       matUnidNoite.opacity = solEstado.luzes;
+      uLuzU.uSpill.value = SPILL * solEstado.luzes;
       if (meshListras) meshListras.material.opacity = (estado.andar != null ? 0.6 : 1) * (1 - solEstado.luzes);
       pedirRender();
     }
   }
   function desligarSol() {
+    ceuDomo.visible = false;
     entB7.atualizarSol({ el: 35, t: 720 });
     solEstado.ativo = false;
     solEstado.noite = 0;
@@ -1664,6 +2100,7 @@ function criarCena({
     sol.target.position.copy(CENTRO);
     sol.intensity = LUZ.sol;
     sol.castShadow = true;
+    luzCidade.intensity = 0;
     scene.environmentIntensity = LUZ.env;
     hemi.intensity = LUZ.hemi;
     hemi.color.set(16777215);

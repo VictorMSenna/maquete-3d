@@ -377,6 +377,16 @@ async function criar({
     toques.delete(ev.pointerId);
     if (toques.size < 2) pinca = null;
     cv.classList.remove("arrastando");
+    // pointercancel = the browser took the finger for a page scroll (embedded, pan-y): the moves before it had tilted the view a few
+    // degrees per scroll, so put yaw/pitch back where the touch started
+    if (ev.type === "pointercancel" && arr && !pinca) {
+      yaw = arr.yaw;
+      pitch = arr.pitch;
+      aplicaCam();
+      desenha();
+      arr = null;
+      return;
+    }
     if (arr && moveu < 6) {
       const id = hotEm(ev);
       if (id) irPara2(id);

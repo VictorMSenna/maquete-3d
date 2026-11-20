@@ -93,7 +93,11 @@ async function iniciarVitrine(app) {
     const olha = () => {
       const t = window.__g3dTiles;
       const st = t && t.stats ? t.stats.queued + t.stats.downloading + t.stats.parsing : 0;
-      q = st === 0 ? q + 1 : 0;
+      // an empty queue counts only once the city has started to arrive (on a slow network the queue was empty before the first
+      // request, and the live 3D replaced the poster without the city); without Google (off, no key, light device, failed) as before
+      const g = window.__g3d, semGoogle = /[?&]google3d=0/.test(location.search) || !!g && ["sem-chave", "aparelho-leve", "falhou"].includes(g.estado);
+      const chegou = semGoogle || !!(t && t.stats && t.stats.visible > 0);
+      q = st === 0 && chegou ? q + 1 : 0;
       if (q >= 6 || performance.now() - t02 > 25e3) ok();
       else setTimeout(olha, 250);
     };

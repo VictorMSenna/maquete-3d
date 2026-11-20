@@ -4,6 +4,8 @@
 // { fonte:'modulo-3d', erro:{ id, motivo } }; saída { fonte:'modulo-3d', estado }, { fonte:'modulo-3d', tour:{ ponto, minutos, luzes } } e,
 // com cred=site, { fonte:'modulo-3d', credito:[{ tipo:'janela', dados, visivel }] } (26/10: janela = cidade do Google, como o modulo do Upper).
 import { abrirTour360 } from "./tour360.js";
+import { criarRelogio, controleSol } from "./sol.js";   // 09/11: the sun bar of the building module (same file, same rules): hold button, hour, season line, graded rail
+import { SOL } from "./dados-sol.js";
 
 const q = new URLSearchParams(location.search);
 const $ = (s) => document.querySelector(s);
@@ -65,6 +67,7 @@ const horaMin = hm(q.get("horamin"));
 let minutos = hm(q.get("hora"));
 if (minutos == null) { const d = new Date(); minutos = d.getHours() * 60 + d.getMinutes(); }
 if (horaMin != null) minutos = Math.max(minutos, horaMin);
+minutos = Math.min(1439, Math.max(0, minutos));
 const estacao = ESTACOES.includes(q.get("estacao")) ? q.get("estacao") : estacaoDoRelogio();
 const pontoPedido = IDS.includes(q.get("ponto")) ? q.get("ponto") : (man.cena && man.cena.inicio) || IDS[0];
 const luzesIni = q.has("luzes") ? luzesDe(q.get("luzes")) : null;
@@ -85,15 +88,45 @@ if (!api) { estadoHtml("contexto-perdido"); throw new Error("tour 360 indisponiv
 // the tour's own close button has nowhere to go here
 const st = document.createElement("style"); st.textContent = ".t360-fechar{display:none!important}"; document.head.append(st);
 
-// hour / season bar
-const hora = $("#hora"), horaTxt = $("#hora-txt"), selEst = $("#estacao");
-const mostra = () => { const e = api.estado(); hora.value = e.minutos; horaTxt.textContent = fmt(e.minutos); selEst.value = e.estacao; };
-mostra();
-hora.addEventListener("input", () => {
-  let m = +hora.value; if (horaMin != null && m < horaMin) { m = horaMin; hora.value = m; }
-  horaTxt.textContent = fmt(m); api.definirHora(m);
+// hour / season bar: the building module's clock (criarRelogio) drives the tour, its control (controleSol) is the bar; same numbers as that
+// module's config (1 h per second while held, the night in 3 s, a short tap = 30 min). The clock is the only source of the hour: the tour is
+// told on the next frame (as the building module does), so holding the button repaints at most once per frame.
+const CFG_SOL = { sol: { horasPorSegundo: 1, noiteSegundos: 3, toqueCurtoMin: 30, toqueCurtoMs: 260, estacaoInicial: estacao, horaInicial: fmt(minutos),
+  rotulo: "Simulação do sol para São Paulo; apartamento e vista ilustrativos." } };
+const rel = criarRelogio(SOL, CFG_SOL);
+$("#sol").append(controleSol(rel, CFG_SOL));
+rel.hora(rel.info().t);   // the control measured its width before being attached (short date line): one tick re-renders it at the real width
+// Embedded (11/11, phone): on a phone the hour bar is a ~110-px block at the bottom of a frame that fills the screen. Its rail and its
+// hold button had touch-action:none and the rail's touchstart called preventDefault (sol.js), so a vertical drag that started there
+// never reached the page, and the next drag from the same spot landed on the bar again. Here, as the canvas already does: pan-y on the
+// rail and the button (a sideways drag still moves the hour, a vertical one scrolls the page). sol.js is the building module's file,
+// byte for byte, so it stays as is: its rail touchstart listener is not reached (stopPropagation on the holder, capture), the rail's
+// own native thumb movement is kept on the clock's hour, and a press that the browser turns into a page scroll (pointercancel) puts
+// the hour back where it was before the finger came down.
+if (document.documentElement.classList.contains("embutido")) {
+  const caixa = $("#sol"), faixa = caixa.querySelector(".sol-range");
+  const st1 = document.createElement("style"); st1.id = "embutido-sol-css";
+  st1.textContent = "html.embutido #sol .sol-range,html.embutido #sol .sol-btn{touch-action:pan-y!important}";
+  document.head.appendChild(st1);
+  let toqueNoTrilho = false, horaAntes = null;
+  caixa.addEventListener("touchstart", (e) => { if (e.target === faixa) { toqueNoTrilho = true; e.stopPropagation(); } }, { capture: true, passive: true });
+  const fimToque = () => setTimeout(() => { toqueNoTrilho = false; }, 0);   // after the rail's own change event of touchend
+  caixa.addEventListener("touchend", fimToque, true);
+  caixa.addEventListener("touchcancel", fimToque, true);
+  const segura = (e) => { if (toqueNoTrilho && e.target === faixa) { e.stopImmediatePropagation(); faixa.value = String(Math.round(rel.info().t)); } };
+  caixa.addEventListener("input", segura, true);
+  caixa.addEventListener("change", segura, true);
+  caixa.addEventListener("pointerdown", (e) => { horaAntes = e.pointerType === "touch" ? rel.info().t : null; }, true);
+  caixa.addEventListener("pointerup", () => { horaAntes = null; });
+  caixa.addEventListener("pointercancel", () => { if (horaAntes != null) rel.hora(horaAntes); horaAntes = null; });   // bubble: after sol.js
+}
+let solPend = null, solRaf = 0, pintura = Promise.resolve();
+const aplicaSol = (i) => { const e = api.estado(); if (i.est !== e.estacao) pintura = api.definirEstacao(i.est); if (i.t !== e.minutos) pintura = api.definirHora(i.t); };
+rel.ouvir((i) => {
+  if (horaMin != null && i.t < horaMin) { queueMicrotask(() => rel.hora(horaMin)); return; }
+  solPend = i;
+  if (!solRaf) solRaf = requestAnimationFrame(() => { solRaf = 0; aplicaSol(solPend); });
 });
-selEst.addEventListener("change", () => api.definirEstacao(selEst.value));
 
 // out: state changes (point, hour, lights), polled — the tour has no event for them
 const resumo = () => { const e = api.estado(); return { ponto: e.ponto, minutos: Math.round(e.minutos), luzes: Object.keys(e.luzes || {}).filter((k) => e.luzes[k]) }; };
@@ -101,7 +134,7 @@ let ultimo = "";
 setInterval(() => {
   const e = api.estado(); if (e.andando) return;
   const r = resumo(), k = JSON.stringify(r);
-  if (k !== ultimo) { ultimo = k; manda({ tour: r }); if (String(hora.value) !== String(r.minutos)) mostra(); }
+  if (k !== ultimo) { ultimo = k; manda({ tour: r }); const i = rel.info(); if (!i.segurando && !solRaf && Math.round(i.t) !== r.minutos) rel.hora(e.minutos); }
   if (q.get("cred") === "site") { const l = creditos(), sg = JSON.stringify(l); if (sg !== credSig) { credSig = sg; manda({ credito: l }); } }
 }, 500);
 
@@ -117,11 +150,11 @@ window.addEventListener("message", async (ev) => {
       const reduz = m.reduzido === true || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
       await api.irPara(m.irPara.ponto, reduz ? { dur: 1 } : undefined);
     }
-    if (ESTACOES.includes(m.estacao)) await api.definirEstacao(m.estacao);
-    const t = hm(m.hora); if (t != null) await api.definirHora(horaMin != null ? Math.max(t, horaMin) : t);
+    if (ESTACOES.includes(m.estacao)) { rel.estacao(m.estacao); await api.definirEstacao(m.estacao); }
+    const t = hm(m.hora); if (t != null) { const t2 = Math.min(1439, Math.max(horaMin != null ? horaMin : 0, t)); rel.hora(t2); await api.definirHora(t2); }
     const l = luzesDe(m.luzes);
     if (l) { const e = api.estado(); for (const k of Object.keys(e.luzes || {})) await api.definirLuz(k, !!l[k]); }
-    mostra();
+    await pintura;
     const e = api.estado();
     manda({ pronto: { id, tour: { ponto: e.ponto, minutos: Math.round(e.minutos), estacao: e.estacao, luzes: Object.keys(e.luzes || {}).filter((k) => e.luzes[k]), reflexo: false } } });
   } catch (err) { manda({ erro: { id, motivo: String(err && err.message || err) } }); }

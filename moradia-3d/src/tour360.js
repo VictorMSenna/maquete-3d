@@ -242,12 +242,30 @@ async function criar({
   let yaw = 0, pitch = 0, fov = innerHeight > innerWidth ? 90 : 75;
   const RAIO = 5;
   const esferas = /* @__PURE__ */ new Map();
+  const NITIDO = !/[?&]nitido=0/.test(location.search);
+  const NITIDO_GLSL = `
+vec4 amostraNitida(sampler2D t, vec2 uv) {
+  vec2 ts = vec2(textureSize(t, 0)), pf = fwidth(uv * ts);
+  vec4 bl = texture2D(t, uv);
+  if (max(pf.x, pf.y) >= 1.0 || pf.x > 0.25 * ts.x) return bl;   // minified, or across the u = 0/1 seam: plain bilinear
+  vec2 sp = uv * ts, t1 = floor(sp - 0.5) + 0.5, f = sp - t1;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f), w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2, t0 = (t1 - 1.0) / ts, t3 = (t1 + 2.0) / ts, t12 = (t1 + w2 / w12) / ts;
+  vec4 r = texture2D(t, vec2(t0.x, t0.y)) * w0.x * w0.y + texture2D(t, vec2(t12.x, t0.y)) * w12.x * w0.y + texture2D(t, vec2(t3.x, t0.y)) * w3.x * w0.y
+         + texture2D(t, vec2(t0.x, t12.y)) * w0.x * w12.y + texture2D(t, vec2(t12.x, t12.y)) * w12.x * w12.y + texture2D(t, vec2(t3.x, t12.y)) * w3.x * w12.y
+         + texture2D(t, vec2(t0.x, t3.y)) * w0.x * w3.y + texture2D(t, vec2(t12.x, t3.y)) * w12.x * w3.y + texture2D(t, vec2(t3.x, t3.y)) * w3.x * w3.y;
+  return max(r, vec4(0.0));
+}
+`;
   function esfera(id) {
     if (esferas.has(id)) return esferas.get(id);
     const p = PTS[id];
     const geo = new THREE.SphereGeometry(RAIO, SEG_H, SEG_V);
     geo.scale(-1, 1, 1);
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
+    if (NITIDO) mat.onBeforeCompile = (sh) => {   // 19/11: on a phone the 4096 panorama is magnified ~1.5x; bilinear blurs it. Catmull-Rom (9 taps) where the texel is larger than the screen pixel, bilinear elsewhere (?nitido=0 = bilinear, A/B)
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\n" + NITIDO_GLSL).replace("#include <map_fragment>", "#ifdef USE_MAP\n  diffuseColor *= amostraNitida(map, vMapUv);\n#endif");
+    };
     const m = new THREE.Mesh(geo, mat);
     m.position.copy(paraMundo(p.pos));
     m.visible = false;
@@ -321,11 +339,13 @@ async function criar({
     }
     grupoHot.clear();
   }
-  const BOLA_M = 0.44, BOLA_MIN = 34;
+  const BOLA_M = 0.44, BOLA_MIN = 34, vFrente = new THREE.Vector3(), vRel = new THREE.Vector3();
+  const fundura = (m) => { camera.getWorldDirection(vFrente); return Math.max(0.1, vRel.copy(m.position).sub(camera.position).dot(vFrente)); };
   function ajustaHot() {
     const k = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / (cv.clientHeight || 1);
-    // MORADIA-CONSERTO (review item 18, after): a door ball 1 m away was 0.44 m wide = a giant ring; on screen it stays 34-56 px
-    for (const m of grupoHot.children) { const d = camera.position.distanceTo(m.position); m.scale.setScalar(MORADIA ? Math.min(Math.max(BOLA_M, BOLA_MIN * k * d), 56 * k * d) : Math.max(BOLA_M, BOLA_MIN * k * d)); }
+    // 09/11: the rings are one size on screen, the 34 px of the building module, wherever they are. The size is solved on the depth along the view (what the sprite is
+    // divided by): solved on the distance, a ring near the edge of a wide view came out 1.3-1.6x larger than asked
+    for (const m of grupoHot.children) m.scale.setScalar(MORADIA ? BOLA_MIN * k * fundura(m) : Math.max(BOLA_M, BOLA_MIN * k * camera.position.distanceTo(m.position)));
   }
   function montaHot() {
     limpaHot();
@@ -378,8 +398,18 @@ async function criar({
     const r = cv.getBoundingClientRect();
     ndc.set((ev.clientX - r.left) / r.width * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
-    const h = ray.intersectObjects(grupoHot.children, false)[0];
-    return h ? h.object.userData.id : null;
+    const h = ray.intersectObjects(grupoHot.children.filter((m) => m.visible), false)[0];
+    if (h) return h.object.userData.id;
+    if (!MORADIA) return null;
+    // the ring is small on screen, the place to tap stays comfortable: up to 26 px from its centre
+    let melhor = null, dMin = 26;
+    for (const m of grupoHot.children) {
+      vRel.copy(m.position).project(camera);
+      if (vRel.z >= 1 || !m.visible) continue;
+      const dd = Math.hypot(r.left + (vRel.x * 0.5 + 0.5) * r.width - ev.clientX, r.top + (-vRel.y * 0.5 + 0.5) * r.height - ev.clientY);
+      if (dd < dMin) { dMin = dd; melhor = m.userData.id; }
+    }
+    return melhor;
   }
   let arr = null, moveu = 0;
   const toques = /* @__PURE__ */ new Map();
@@ -419,6 +449,16 @@ async function criar({
     toques.delete(ev.pointerId);
     if (toques.size < 2) pinca = null;
     cv.classList.remove("arrastando");
+    // 11/11: pointercancel = the browser took the finger for a page scroll (embedded, pan-y). The moves before that (up to the
+    // touch slop) had tilted the view ~3 deg each time, so ten page scrolls over the tour ended looking at the floor: put it back.
+    if (ev.type === "pointercancel" && arr && !pinca) {
+      yaw = arr.yaw;
+      pitch = arr.pitch;
+      aplicaCam();
+      desenha();
+      arr = null;
+      return;
+    }
     if (arr && moveu < 6) {
       const id = hotEm(ev);
       if (id) irPara2(id);
@@ -476,7 +516,7 @@ async function criar({
     }
     const sol = [document.querySelector("#interior-sol"), document.querySelector("#sol")].find(visivelEl);
     let baseY = sol && sol.getBoundingClientRect().height ? Math.min(r.bottom - 20, sol.getBoundingClientRect().top - 10) : r.bottom - 20;
-    for (const d of document.querySelectorAll("#interior-sol .sol-dica")) if (visivelEl(d)) baseY = Math.min(baseY, d.getBoundingClientRect().top - 6);
+    for (const d of document.querySelectorAll("#interior-sol .sol-dica, #sol .sol-dica")) if (visivelEl(d)) baseY = Math.min(baseY, d.getBoundingClientRect().top - 6);   // 09/11: the MORADIA page holds the same bar in #sol
     {
       const ri = raiz.querySelector(".t360-rot");
       if (visivelEl(ri)) {
@@ -488,11 +528,16 @@ async function criar({
     vF.y = 0;
     vF.normalize();
     const precisa = [], aneis = [], vistos = new Set(), posBola = new Map();
+    // phones: the strip kept for the walk buttons covers as many rows as all of them could need (a ring half hidden behind a second row looked broken)
+    let faixa = 0, anelMudou = false;
+    if (r.width <= 760) { const ids = PTS[estado.ponto].alvos || [...new Set(grupoHot.children.map((m) => m.userData.id))]; const tot = ids.reduce((s, id) => s + (PTS[id] ? largChip(id) + 6 : 0), 0); faixa = Math.max(1, Math.ceil(tot / Math.max(1, r.width - 16))) * 36 + 30; }
     for (const m of grupoHot.children) {
       vC.copy(m.position).project(camera);
       const x = r.left + (vC.x * 0.5 + 0.5) * r.width, y = r.top + (-vC.y * 0.5 + 0.5) * r.height, R2 = 22;
       const naTela = vC.z < 1 && x > r.left + 24 && x < r.right - 24 && y > r.top + 24 && y < r.bottom - 24;
-      const tapado = tampas.some((q) => x + R2 > q.left && x - R2 < q.right && y + R2 > q.top && y - R2 < q.bottom);
+      // on phones a ring in the strip of the walk buttons gives way to its button: the buttons keep their place right above the sun bar
+      const tapado = tampas.some((q) => x + R2 > q.left && x - R2 < q.right && y + R2 > q.top && y - R2 < q.bottom) || (faixa > 0 && y + R2 > baseY - faixa && y - R2 < baseY);
+      if (MORADIA && m.visible === (naTela && tapado)) { m.visible = !(naTela && tapado); anelMudou = true; }   // a ring under the interface became a button: it is not drawn behind it
       if (naTela && !tapado) {
         aneis.push([x - r.left, y]);
         vistos.add(m.userData.id);
@@ -524,7 +569,6 @@ async function criar({
       if (lista[k].x + lista[k].w / 2 > lim) lista[k].x = lim - lista[k].w / 2;
       lim = lista[k].x - lista[k].w / 2 - 6;
     }
-    for (const c of lista) for (const [ax, ay] of aneis) if (Math.abs(c.x - ax) < c.w / 2 + 22 && ay > baseY - 36 - 22 && ay < baseY + 22) baseY = Math.min(baseY, ay - 28);
     // D7: chips that do not fit in one row (412 px) wrap into rows going UP from the base line, never off screen or under the bar
     const larguraTotal = lista.reduce((s, c) => s + c.w + 6, 0);
     if (larguraTotal > W - 16) {
@@ -534,7 +578,16 @@ async function criar({
         c.x = xx + c.w / 2; c.linha = linha; xx += c.w + 6;
       }
     }
-    const yDe = (c) => baseY - (c.linha || 0) * 44;
+    // the buttons never climb into the row of the light buttons: a ring under them only lifts them while the whole block still fits below the top interface
+    const estreito = W <= 760, passo = estreito ? 36 : 44, altoChip = estreito ? 30 : 36, nLinhas = 1 + lista.reduce((n, c) => Math.max(n, c.linha || 0), 0);
+    const teto = tampas.reduce((t, q) => q.bottom < r.top + r.height / 2 ? Math.max(t, q.bottom) : t, r.top);
+    const baseMin = teto + 6 + altoChip + (nLinhas - 1) * passo;
+    if (!estreito) for (const c of lista) for (const [ax, ay] of aneis) {
+      const yc = baseY - (c.linha || 0) * passo;
+      if (Math.abs(c.x - ax) < c.w / 2 + 22 && ay > yc - altoChip - 22 && ay < yc + 22 && ay - 28 + (c.linha || 0) * passo >= baseMin) baseY = Math.min(baseY, ay - 28 + (c.linha || 0) * passo);
+    }
+    const yDe = (c) => baseY - (c.linha || 0) * passo;
+    if (anelMudou) requestAnimationFrame(desenha);
     const sig = lista.map((c) => c.id + ":" + Math.round(c.x / 8) + c.seta + (c.linha || 0)).join("|") + "@" + Math.round(baseY);
     if (sig === chipsSig) return;
     chipsSig = sig;
@@ -576,8 +629,10 @@ async function criar({
     largChips.set(id, w);
     return w;
   }
+  // 09/11: the balcony's arrival looks at the table and the room, with or without the city: straight out there is no piece of the apartment on screen
+  const CHEGADA_MORADIA = { varanda: [90, -6] };
   function chegadaDe(id) {
-    const c = (EMBUTIDO || MORADIA || /[?&]chegada=1/.test(location.search)) && CENA.chegada && CENA.chegada[id];   // moradia: always
+    const c = (EMBUTIDO || MORADIA || /[?&]chegada=1/.test(location.search)) && ((MORADIA && CHEGADA_MORADIA[id]) || (CENA.chegada && CENA.chegada[id]));   // moradia: always
     return Array.isArray(c) && c.length >= 2 ? c.map(Number) : null;
   }
   let andando = null;
@@ -633,6 +688,7 @@ async function criar({
       estado.ponto = id;
       destino = null;
       raiz.querySelector(".t360-nome").textContent = PTS[id].nome;
+      { const bp = document.querySelector("#barra-ponto"); if (bp) bp.textContent = PTS[id].nome; }
       if (de !== para) de.mix.soltarCamadas();
       andando = null;
       botoesLuz();
@@ -889,6 +945,14 @@ async function criar({
             const c = gm.ceuParaSol(el);
             mat.uniforms.ceuTopo.value.set(...c.topo);
             mat.uniforms.ceuHoriz.value.set(...c.horiz);
+            // 09/11: the sky above the city is drawn by the overlay (ceuEm): it needs the sun in the panorama frame (forward -x = bearing rumo,
+            // see dirParaL) so the horizon brightens toward the sun instead of a flat band
+            const sol = e.mix.ultimo && e.mix.ultimo.sol, az = sol && Number.isFinite(sol.az) ? sol.az : 0, elr = (Number.isFinite(el) ? el : -20) * Math.PI / 180;
+            const b = (vista.ref.rumo + (vista.ref.ajuste && vista.ref.ajuste.rumo || 0)) * Math.PI / 180, rel = az * Math.PI / 180 - b;
+            if (mat.uniforms.solDir) mat.uniforms.solDir.value.set(-Math.cos(elr) * Math.cos(rel), Math.sin(elr), -Math.cos(elr) * Math.sin(rel));
+            mat.uniforms.veuAtivo.value = MORADIA && VEU.fora.value ? 1 : 0;   // these panoramas are black outside: the city replaces the veil on the window edges
+            mat.uniforms.veuTopo.value.copy(VEU.topo.value);
+            mat.uniforms.veuHoriz.value.copy(VEU.horiz.value);
           }
           this.el = el;
           const cv2 = PTS[id].camadas && PTS[id].camadas.vidro;
@@ -1131,8 +1195,8 @@ async function criar({
       const r = cv.getBoundingClientRect();
       return grupoHot.children.map((m) => {
         const v = m.position.clone().project(camera);
-        const px = m.scale.x / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / (cv.clientHeight || 1) * camera.position.distanceTo(m.position));
-        return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1, px: Math.round(px) };
+        const px = m.scale.x / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / (cv.clientHeight || 1) * fundura(m));
+        return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: m.visible && v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1, px: Math.round(px) };
       });
     },
     cursor: () => cv.className,
@@ -1174,6 +1238,7 @@ async function criar({
     }
   }
   raiz.querySelector(".t360-nome").textContent = PTS[estado.ponto].nome;
+  { const bp = document.querySelector("#barra-ponto"); if (bp) bp.textContent = PTS[estado.ponto].nome; }
   aplicaCam();
   redim();
   marcaLuzes();

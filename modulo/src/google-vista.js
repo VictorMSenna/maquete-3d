@@ -97,9 +97,360 @@ vec3 g3dOmbro(vec3 x, vec2 o) {
   return mix(x, mix(x, s, step(vec3(o.x), x)), o.y);
 }
 `;
+// Redesign 14/11 (janelas-cidade): lit windows of the Google city taken from the tile's own day photo, so they sit on the real windows
+// of the facade. A window = a patch of the photo clearly darker than its ~5 m surroundings (and than
+// its ~2 m surroundings, so a cast shadow does not count), grey or cool like glass (a dark pane is never "saturated"), on a wall that
+// faces the camera, more than ~6 m above the street, not green, not on a 1-2 storey house of the footprint map.
+// Redesign 15/11 (janelas-cidade-2): every lit thing is a clean axis-aligned rectangle in the plane of the face, never the raw dark
+// mask (the mask lit balcony shadows, zig-zag balcony faces and sign letters with their ragged outline).
+// Near (pixel <= G3DPERTO m, photo >= G3DKMIN texels/m): (1) from the pixel, the 4 edges of the dark glass (40 cm steps, 3 halvings);
+// 0.5-2.6 m tall, 0.4-3.4 m wide; (2) the centre snapped to a 20 cm lattice of the face, the wall level measured again there, and each
+// edge searched again from that seed within 25 cm of step 1 (a fixed point: every pixel of a clean window lands on the same box, a
+// ragged patch fails); (3) 3 x 3 taps inside >= 7 dark and no in/out alternation along a row (letters, grilles); (4) glass just inside
+// and wall >= 30 cm outside each edge at 1/4 and 3/4 of its length (at most G3DMA miss); the box is snapped to 5 cm, inset by sill /
+// lintel / jamb margins and drawn only if >= 3 px each way. Balconies: a cell whose seed (the centre of the grid window of that floor x
+// bay) is dark glass and stays dark 0.9 m to each side is a balcony recess; a dark band running > 2.4 m both ways is a balcony band:
+// both light the grid's bay rectangle inside the recess height (parapet and floor stay dark). Far: one grid rectangle per floor x bay
+// cell, lit only if the photo is glass at that cell's window (decided by the cell alone). Light-grey reflective glass (G3DLCLIGA) is
+// off: measured in medidas-3d.md. Where the photo is a blur (under ~2.6 texels per metre AND local contrast under uJanG.z), the grid
+// takes over, same hash and colours. All the photo work runs only on camera-facing walls.
+// uJanG = (gain, darkness ratio, contrast floor, view); gain 0 = no windows; view 1 = start mask, 2 = contrast / texels, 3 = which rule,
+// 4 = every detected window lit, 5 = where the near test stopped (tests).
+const QS_JAN = typeof location !== "undefined" ? new URLSearchParams(location.search).get("g3djan") : null; // tests: 0 = no windows (before 14/11), 1 = the old grid windows
+const JAN_G0 = [QS_JAN === "0" || QS_JAN === "1" ? 0 : 1, 0.78, 0.12];
+const JAN_GLSL = `
+#if defined(USE_MAP) && !defined(G3D_PLANO)
+#define G3DL(c) sqrt(max(dot((c), vec3(0.2126, 0.7152, 0.0722)), 0.0))
+#define G3DLC 1.18
+#define G3DLC2 1.08
+#define G3DLCLIGA 0.0
+#define G3DMA 1.0
+#define G3DPERTO 0.15
+#define G3DKMIN 3.0
+#define G3DRAS0 0.2
+#define G3DIN(q) step(0.0, modoJ * (limM - G3DL(textureLod(map, vMapUv + jJ * (q), lodMJ).rgb) / lWJ))
+    if (uNoiteG > 0.001 && uJanG.x > 0.0) {
+      vec3 pxJ = dFdx(vB5), pyJ = dFdy(vB5);
+      vec3 nJ = normalize(cross(pxJ, pyJ));
+      vec2 uxJ = dFdx(vMapUv), uyJ = dFdy(vMapUv);
+      vec3 camJ = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
+      // only walls facing the camera (a wall seen almost edge-on would squeeze its windows into 1-2 pixel slivers); all the photo work below runs on them only (roofs, ground and grazing walls skip it)
+      float geoJ = (1.0 - smoothstep(0.35, 0.5, abs(nJ.y))) * smoothstep(G3DRAS0, G3DRAS0 + 0.13, abs(dot(nJ, normalize(camJ - vB5))));
+      vec3 emJ = vec3(0.0); float covJ = 0.0, fotoLigaJ = 0.0, mascVerJ = 0.0, contJ = 0.0, pobreJ = 0.0, verdeJ = 0.0, kJ = 0.0, regraJ = 0.0, falhaJ = 0.0;
+      if (geoJ > 0.001) {
+        float hChaoJ = 3.8;
+        if (uTerrExt > 0.0) { vec2 rqJ = (vB5.xz + uTerrExt) / (2.0 * uTerrExt); if (all(greaterThan(rqJ, vec2(0.0))) && all(lessThan(rqJ, vec2(1.0)))) hChaoJ = texture2D(uTerr, rqJ).b * 60.0 - 20.0; }
+        float hLocJ = vB5.y - hChaoJ;
+        geoJ *= smoothstep(5.0, 7.0, hLocJ);
+        if (uMapaR.z > 0.0) {
+          vec2 uvMJ = vec2((vB5.x - uMapaR.x) * uMapaR.z, 1.0 - (vB5.z - uMapaR.y) * uMapaR.z);
+          if (all(greaterThan(uvMJ, vec2(0.0))) && all(lessThan(uvMJ, vec2(1.0)))) {
+            vec2 eMJ = vec2(2.5 * uMapaR.z, 0.0); float topoJ = -1.0; vec4 cMp;
+            cMp = texture2D(uMapaP, uvMJ); if (cMp.a > 0.5) topoJ = max(topoJ, cMp.w - 1.0);
+            cMp = texture2D(uMapaP, uvMJ + eMJ.xy); if (cMp.a > 0.5) topoJ = max(topoJ, cMp.w - 1.0);
+            cMp = texture2D(uMapaP, uvMJ - eMJ.xy); if (cMp.a > 0.5) topoJ = max(topoJ, cMp.w - 1.0);
+            cMp = texture2D(uMapaP, uvMJ + eMJ.yx); if (cMp.a > 0.5) topoJ = max(topoJ, cMp.w - 1.0);
+            cMp = texture2D(uMapaP, uvMJ - eMJ.yx); if (cMp.a > 0.5) topoJ = max(topoJ, cMp.w - 1.0);
+            if (topoJ > 0.0 && topoJ < 9.0) geoJ = 0.0; // a 1-2 storey house of the footprint map: no lit window
+          }
+        }
+        vec2 nhJ = nJ.xz / max(length(nJ.xz), 1e-4);
+        vec2 tgJ = vec2(-nhJ.y, nhJ.x);
+        float ladoJ = floor(atan(nhJ.y, nhJ.x) * 1.2732 + 0.5);
+        if (uAngExt > 0.0) {
+          vec2 ruJ = (vB5.xz + uAngExt) / (2.0 * uAngExt);
+          if (all(greaterThan(ruJ, vec2(0.0))) && all(lessThan(ruJ, vec2(1.0)))) {
+            vec3 anJ = texture2D(uAng, ruJ).rgb;
+            if (anJ.b > 0.35) {
+              float tJ = atan(anJ.g * 2.0 - 1.0, anJ.r * 2.0 - 1.0) * 0.25;
+              vec2 a1J = vec2(cos(tJ), sin(tJ)), a2J = vec2(-a1J.y, a1J.x);
+              float d1J = dot(nhJ, a1J), d2J = dot(nhJ, a2J);
+              if (abs(d1J) > abs(d2J)) { tgJ = a2J; ladoJ = 20.0 + sign(d1J) * 3.0; } else { tgJ = a1J; ladoJ = 30.0 + sign(d2J) * 3.0; }
+            }
+          }
+        }
+        vec2 tszJ = vec2(textureSize(map, 0));
+        vec3 e1J = vec3(-nhJ.y, 0.0, nhJ.x), e2J = normalize(vec3(0.0, 1.0, 0.0) - nJ * nJ.y);
+        mat2 mJ = mat2(dot(pxJ, e1J), dot(pxJ, e2J), dot(pyJ, e1J), dot(pyJ, e2J));
+        float detJ = determinant(mJ);
+        if (abs(detJ) < 1e-12) geoJ = 0.0;
+        mat2 jJ = mat2(uxJ, uyJ) * inverse(abs(detJ) < 1e-12 ? mat2(1.0) : mJ); // columns: uv per metre along the face, uv per metre up
+        kJ = sqrt(abs(determinant(jJ)) * tszJ.x * tszJ.y); // photo texels per metre on this face
+        float lodSJ = 0.5 * log2(max(max(dot(uxJ * tszJ, uxJ * tszJ), dot(uyJ * tszJ, uyJ * tszJ)), 1e-8));
+        float lodWJ = log2(max(kJ * 0.35, 1e-4)); // a pixel bigger than ~35 cm: the window is a few pixels, average 4 taps
+        float lodNJ = max(lodSJ, 0.0);
+        // the wall's own level around this point: taps on rings in the plane of the face, read ~50 cm wide; they follow the photo's
+        // own UV, so they stay on this facade (a coarse mip of the tile texture mixes unrelated parts of its atlas: roofs, trees, other
+        // walls, and made lit slivers on near buildings). 4 taps at 2.2 m first; only a point dark enough to be a window gets 4 more
+        // at 2.2 m and 4 at 0.9 m (the cast-shadow test), so a plain wall pays 4 taps
+        bool pertoJ = lodSJ <= log2(max(kJ * G3DPERTO, 1e-4)) && kJ >= G3DKMIN; // the window test needs a window of ~8+ pixels and a sharp enough photo; else the far cell rule
+        float lodRJ = max(log2(max(kJ * 0.5, 1e-4)), lodNJ);
+        vec3 c0J = textureLod(map, vMapUv, lodNJ).rgb;
+        vec3 cBJ = vec3(0.0);
+        for (int a = 0; a < 4; a++) { float angJ = float(a) * 1.5708; cBJ += textureLod(map, vMapUv + (jJ[0] * cos(angJ) + jJ[1] * sin(angJ)) * 2.2, lodRJ).rgb; }
+        float lBJ = max(G3DL(cBJ * 0.25), 0.03), lMJ = lBJ;
+        if (pertoJ && (G3DL(c0J) / lBJ < uJanG.y + 0.15 || (G3DLCLIGA > 0.5 && G3DL(c0J) / lBJ > G3DLC - 0.06))) {
+          float sMJ = 0.0;
+          for (int a = 0; a < 4; a++) {
+            float angJ = float(a) * 1.5708;
+            cBJ += textureLod(map, vMapUv + (jJ[0] * cos(angJ + 0.7854) + jJ[1] * sin(angJ + 0.7854)) * 2.2, lodRJ).rgb;
+            sMJ += G3DL(textureLod(map, vMapUv + (jJ[0] * cos(angJ) + jJ[1] * sin(angJ)) * 0.9, lodRJ).rgb);
+          }
+          lBJ = max(G3DL(cBJ * 0.125), 0.03); lMJ = max(sMJ * 0.25, 0.03); cBJ *= 0.5;
+        }
+        cBJ *= 0.25;
+        float aaJ = 0.04;
+        // too poor for the photo rule = a blur: under ~2.6 photo texels per metre (a 1.3 m window spans < 3.5 texels) AND little local
+        // contrast (3 x 3 taps 1.4 m apart, each ~0.7 m wide, so a window always counts); a sharp blank wall keeps no window
+        float baixaJ = 1.0 - smoothstep(1.8, 2.6, kJ);
+        if (baixaJ > 0.001) {
+          float lodCJ = max(log2(max(kJ * 0.7, 1e-4)), lodNJ), qMinJ = 9.0, qMaxJ = 0.0;
+          for (int a = -1; a <= 1; a++) for (int b = -1; b <= 1; b++) {
+            float qJ = G3DL(textureLod(map, vMapUv + (jJ[0] * float(a) + jJ[1] * float(b)) * 1.4, lodCJ).rgb);
+            qMinJ = min(qMinJ, qJ); qMaxJ = max(qMaxJ, qJ);
+          }
+          contJ = (qMaxJ - qMinJ) / lBJ;
+          pobreJ = baixaJ * (1.0 - smoothstep(uJanG.z, uJanG.z + 0.06, contJ));
+        }
+        verdeJ = step(cBJ.r * 1.04, cBJ.g) * step(cBJ.b, cBJ.g);
+        float hrJ = uJanHora / 60.0; hrJ = hrJ < 12.0 ? hrJ + 24.0 : hrJ;
+        float occJ = hrJ < 19.0 ? mix(0.28, 0.44, clamp((hrJ - 17.0) / 2.0, 0.0, 1.0)) : hrJ < 22.0 ? 0.44 : hrJ < 24.0 ? mix(0.44, 0.24, (hrJ - 22.0) / 2.0) : mix(0.24, 0.08, clamp((hrJ - 24.0) / 3.0, 0.0, 1.0));
+        vec2 nAJ = vec2(tgJ.y, -tgJ.x);
+        float sJ = dot(vB5.xz, tgJ), sgJ = dot(e1J.xz, tgJ) < 0.0 ? -1.0 : 1.0;
+        vec2 baseIdJ = vec2(ladoJ * 17.0 + floor(dot(vB5.xz, nAJ) / 6.0) * 5.3, ladoJ * 3.1);
+        vec2 gqJ = vec2(sJ / 3.0, hLocJ / 2.95);
+        vec2 gwJ = max(vec2(abs(dot(pxJ.xz, tgJ)) + abs(dot(pyJ.xz, tgJ)), (abs(pxJ.y) + abs(pyJ.y)) / 0.983) / 3.0, vec2(1e-4)); // pixel footprint in cells
+        // pixel footprint in metres on the face (along e1J, up e2J): antialias of the lit rectangles
+        float fXJ = max(abs(dot(pxJ, e1J)) + abs(dot(pyJ, e1J)), 1e-4), fYJ = max(abs(dot(pxJ, e2J)) + abs(dot(pyJ, e2J)), 1e-4);
+        if (geoJ > 0.001 && verdeJ < 0.5) {
+          float mRJ = 0.0; vec2 idRJ = vec2(0.0);
+          if (pertoJ) {
+            // NEAR: the window this pixel belongs to is found in the photo and lit as ONE axis-aligned rectangle in the plane of the face,
+            // never as the raw dark mask. The photo is read a little blurred (thin mullions and transoms vanish).
+            float lodMJ = lodNJ + 0.7;
+            vec3 cMJ = textureLod(map, vMapUv, lodMJ).rgb;
+            float lFJ = G3DL(cMJ);
+            float mxF = sqrt(max(cMJ.r, max(cMJ.g, cMJ.b))), mnF = sqrt(min(cMJ.r, min(cMJ.g, cMJ.b))), satF = (mxF - mnF) / (mxF + 0.15);
+            float vidroF = max(1.0 - smoothstep(0.20, 0.34, satF), step(cMJ.r * 1.03, cMJ.b) * (1.0 - smoothstep(0.40, 0.55, satF)));
+            // kind: 1 = dark glass (under uJanG.y x the wall level), -1 = light-grey reflective glass (over G3DLC x the wall level and over
+            // G3DLC2 x its 0.9 m surroundings, grey); "inside the window" for every test below = modoJ * (limM - ratio) >= 0
+            // BALCONIES first: the seed of this floor x bay cell (the centre of its grid window). If the photo is dark glass there and
+            // 0.9 m to each side (a dark recess wider than a window), it is a balcony: light the window behind it as the grid's bay
+            // rectangle inside the recess height, decided by the cell alone (every pixel of the cell, railing or plant, agrees)
+            bool varJ = false;
+            float cosVJ = dot(e1J.xz, tgJ);
+            if (abs(cosVJ) > 0.95) {
+              vec2 gcV = floor(gqJ), gfV = fract(gqJ);
+              vec2 sdV = vec2((0.5 - gfV.x) * 3.0 / cosVJ, (0.55 - gfV.y) * 2.95);
+              float lodVJ = max(log2(max(kJ * 0.5, 1e-4)), lodNJ), limV = uJanG.y + 0.07;
+              vec3 sWV = vec3(0.0);
+              for (int a = 0; a < 4; a++) { float angJ = float(a) * 1.5708 + 0.7854; sWV += textureLod(map, vMapUv + jJ * (sdV + 2.2 * vec2(cos(angJ), sin(angJ))), lodRJ).rgb; }
+              float lWV = max(G3DL(sWV * 0.25), 0.03);
+              // the seed must be on this facade: its wall level close to this pixel's (a UV seam sends the read to another part of the atlas)
+              if (abs(lWV / lBJ - 1.0) < 0.5 && G3DL(textureLod(map, vMapUv + jJ * sdV, lodVJ).rgb) / lWV < limV
+                  && G3DL(textureLod(map, vMapUv + jJ * (sdV + vec2(0.9, 0.0)), lodVJ).rgb) / lWV < limV
+                  && G3DL(textureLod(map, vMapUv + jJ * (sdV - vec2(0.9, 0.0)), lodVJ).rgb) / lWV < limV) {
+                vec2 bV = vec2(-1.0);
+                for (int d = 0; d < 2; d++) {
+                  vec2 dvJ = d == 0 ? vec2(0.0, 1.0) : vec2(0.0, -1.0);
+                  float lo = 0.0, hi = -1.0;
+                  for (int i = 1; i <= 6; i++) { float t = float(i) * 0.4; if (G3DL(textureLod(map, vMapUv + jJ * (sdV + dvJ * t), lodVJ).rgb) / lWV >= limV) { hi = t; break; } lo = t; }
+                  if (hi > 0.0) { for (int b = 0; b < 3; b++) { float t = 0.5 * (lo + hi); if (G3DL(textureLod(map, vMapUv + jJ * (sdV + dvJ * t), lodVJ).rgb) / lWV >= limV) hi = t; else lo = t; } bV[d] = 0.5 * (lo + hi); }
+                }
+                float altV = bV.x + bV.y;
+                if (bV.x > 0.0 && bV.y > 0.0 && altV >= 0.8 && altV <= 2.8) {
+                  varJ = true;
+                  float BV = sdV.y - bV.y, TV = sdV.y + bV.x;
+                  float dXJ = min(gfV.x - 0.2, 0.8 - gfV.x) * 3.0, fXV = max(gwJ.x * 3.0, 1e-4);
+                  float dYJ = min(-(BV + 0.05 + 0.28 * altV), TV - 0.05 - 0.08 * altV);
+                  mRJ = smoothstep(-0.5 * fXV, 0.5 * fXV, dXJ) * smoothstep(-0.5 * fYJ, 0.5 * fYJ, dYJ);
+                  mRJ *= step(3.0 * fXV, 1.8) * step(3.0 * fYJ, 0.64 * altV - 0.1);
+                  idRJ = gcV + baseIdJ + vec2(57.0, 0.0);
+                  regraJ = 2.0; falhaJ = 6.0;
+                }
+              }
+            }
+            float modoJ = 0.0;
+            if (!varJ && lFJ / lBJ < uJanG.y && lFJ / lMJ < 0.92 && vidroF > 0.5) modoJ = 1.0;
+            else if (G3DLCLIGA > 0.5 && lFJ / lBJ > G3DLC && lFJ / lMJ > G3DLC2 && satF < 0.12) modoJ = -1.0;
+            mascVerJ = modoJ > 0.0 ? 1.0 : modoJ < 0.0 ? 0.5 : 0.0;
+            if (modoJ != 0.0) {
+              float limM = modoJ > 0.0 ? uJanG.y : G3DLC - 0.04, lWJ = lBJ;
+              // 1. from this pixel to the 4 edges of the glass: steps of 40 cm up to 2.4 m, then 3 halvings (~5 cm)
+              vec4 bJ = vec4(-1.0);
+              for (int d = 0; d < 4; d++) {
+                vec2 dvJ = d == 0 ? vec2(0.0, 1.0) : d == 1 ? vec2(0.0, -1.0) : d == 2 ? vec2(1.0, 0.0) : vec2(-1.0, 0.0);
+                float lo = 0.0, hi = -1.0;
+                for (int i = 1; i <= 6; i++) { float t = float(i) * 0.4; if (G3DIN(dvJ * t) < 0.5) { hi = t; break; } lo = t; }
+                if (hi > 0.0) { for (int b = 0; b < 3; b++) { float t = 0.5 * (lo + hi); if (G3DIN(dvJ * t) < 0.5) hi = t; else lo = t; } bJ[d] = 0.5 * (lo + hi); }
+                if (d == 1 && (bJ.x < 0.0 || bJ.y < 0.0)) break;
+              }
+              float altJ = bJ.x + bJ.y, largJ = bJ.z + bJ.w;
+              float minA = modoJ > 0.0 ? 0.5 : 0.8, minL = modoJ > 0.0 ? 0.4 : 0.6;
+              bool vertJ = bJ.x > 0.0 && bJ.y > 0.0 && altJ >= minA && altJ <= 2.6;
+              bool janJ = vertJ && bJ.z > 0.0 && bJ.w > 0.0 && largJ >= minL && largJ <= 3.4;
+              bool faixaJ = vertJ && modoJ > 0.0 && bJ.z < 0.0 && bJ.w < 0.0;
+              falhaJ = 1.0;
+              if (janJ || faixaJ) {
+                vec2 cJ = vec2(janJ ? 0.5 * (bJ.z - bJ.w) : 0.0, 0.5 * (bJ.x - bJ.y));
+                // the centre snapped to a 20 cm lattice anchored on the face: every test after this runs from that seed, so the pixels of one
+                // window (whose first searches differ by a few cm) mostly share the seed and get exactly the same answer
+                { float s0J = dot(vB5, e1J), h0J = dot(vB5, e2J); cJ = floor((cJ + vec2(s0J, h0J)) * 5.0 + 0.5) * 0.2 - vec2(s0J, h0J); if (faixaJ) cJ.x = 0.0; }
+                falhaJ = 2.0;
+                // the wall level again around the box centre (4 taps on a 2.2 m ring)
+                vec3 sW = vec3(0.0);
+                for (int a = 0; a < 4; a++) { float angJ = float(a) * 1.5708 + 0.7854; sW += textureLod(map, vMapUv + jJ * (cJ + 2.2 * vec2(cos(angJ), sin(angJ))), lodRJ).rgb; }
+                lWJ = max(G3DL(sW * 0.25), 0.03);
+                if (abs(lWJ / lBJ - 1.0) > 0.5) janJ = faixaJ = false; // the centre is not on this facade (UV seam): no window from here
+                // 2. from the centre, each edge must sit within 25 cm of where step 1 put it (glass 25 cm inside, wall 25 cm outside), then 3
+                // halvings: every pixel of a clean window ends on the same box (a fixed point); a ragged patch (balcony shadow, foliage,
+                // a sign) fails or moves the centre again and is dropped
+                vec4 nbJ = vec4(0.0); bool okJ = janJ || faixaJ;
+                for (int d = 0; d < 4; d++) {
+                  if (!okJ || (faixaJ && d > 1)) break;
+                  vec2 dvJ = d == 0 ? vec2(0.0, 1.0) : d == 1 ? vec2(0.0, -1.0) : d == 2 ? vec2(1.0, 0.0) : vec2(-1.0, 0.0);
+                  float tolJ = max(0.25, 1.2 * 0.75 * exp2(lodMJ) / max(kJ, 1e-3));
+                  float e0 = 0.5 * (d < 2 ? altJ : largJ), lo = max(e0 - tolJ, 0.08), hi = e0 + tolJ;
+                  if (G3DIN(cJ + dvJ * lo) < 0.5 || G3DIN(cJ + dvJ * hi) > 0.5) { okJ = false; break; }
+                  for (int b = 0; b < 3; b++) { float t = 0.5 * (lo + hi); if (G3DIN(cJ + dvJ * t) < 0.5) hi = t; else lo = t; }
+                  nbJ[d] = 0.5 * (lo + hi);
+                }
+                if (okJ && abs(0.5 * (nbJ.x - nbJ.y)) < 0.15 && (faixaJ || abs(0.5 * (nbJ.z - nbJ.w)) < 0.15)) {
+                  falhaJ = 3.0;
+                  altJ = nbJ.x + nbJ.y;
+                  if (janJ) {
+                    largJ = nbJ.z + nbJ.w;
+                    float LJ = cJ.x - nbJ.w, RJ = cJ.x + nbJ.z, BJ = cJ.y - nbJ.y, TJ = cJ.y + nbJ.x;
+                    // 3. compactness: 3 x 3 taps inside the box, >= 7 inside and a row may not alternate in / out (letters, grilles)
+                    float nInJ = 0.0, trJ = 0.0;
+                    for (int a = 0; a < 3; a++) {
+                      float antJ = -1.0;
+                      for (int b = 0; b < 3; b++) {
+                        float inJ = G3DIN(vec2(mix(LJ, RJ, (float(b) + 0.5) / 3.0), mix(BJ, TJ, (float(a) + 0.5) / 3.0)));
+                        nInJ += inJ; if (antJ >= 0.0 && inJ != antJ) trJ += 1.0; antJ = inJ;
+                      }
+                    }
+                    // 4. straight edges: glass just inside each edge and wall outside it, at 1/4 and 3/4 of its length
+                    float maJ = 99.0;
+                    if (nInJ >= 7.0 && trJ <= 2.0) {
+                      maJ = 0.0; falhaJ = 4.0;
+                      // offsets clear of the blur of the read (~0.75 texel of the blurred level), at most 30 % of the window
+                      float bluJ = 0.75 * exp2(lodMJ) / max(kJ, 1e-3);
+                      float oXJ = min(max(0.1, bluJ), 0.3 * largJ), oYJ = min(max(0.1, bluJ), 0.3 * altJ);
+                      // outside: wall for at least 30 cm past every edge (sign letters and grilles sit closer to each other than that)
+                      float pXJ = max(0.3, bluJ), pYJ = max(0.3, bluJ);
+                      for (int a = 0; a < 2; a++) {
+                        float uX = mix(LJ, RJ, 0.25 + 0.5 * float(a)), uY = mix(BJ, TJ, 0.25 + 0.5 * float(a));
+                        maJ += 1.0 - G3DIN(vec2(uX, TJ - oYJ)) + G3DIN(vec2(uX, TJ + pYJ));
+                        maJ += 1.0 - G3DIN(vec2(uX, BJ + oYJ)) + G3DIN(vec2(uX, BJ - pYJ));
+                        maJ += 1.0 - G3DIN(vec2(LJ + oXJ, uY)) + G3DIN(vec2(LJ - pXJ, uY));
+                        maJ += 1.0 - G3DIN(vec2(RJ - oXJ, uY)) + G3DIN(vec2(RJ + pXJ, uY));
+                      }
+                    }
+                    if (maJ <= G3DMA) {
+                      // edges snapped to a 5 cm lattice anchored on the face (pixels whose searches differ by a few cm draw the same box), then
+                      // the lit rectangle = the box inset by sill / lintel / jamb margins, antialiased over the pixel footprint
+                      float s0J = dot(vB5, e1J), h0J = dot(vB5, e2J);
+                      vec4 xyJ = floor(vec4(s0J + LJ, s0J + RJ, h0J + BJ, h0J + TJ) * 20.0 + 0.5) * 0.05 - vec4(s0J, s0J, h0J, h0J);
+                      float iXJ = 0.05 + 0.05 * largJ, iYJ = 0.05 + 0.06 * altJ;
+                      float dXJ = min(-(xyJ.x + iXJ), xyJ.y - iXJ), dYJ = min(-(xyJ.z + iYJ), xyJ.w - iYJ);
+                      mRJ = smoothstep(-0.5 * fXJ, 0.5 * fXJ, dXJ) * smoothstep(-0.5 * fYJ, 0.5 * fYJ, dYJ);
+                      mRJ *= step(3.0 * fXJ, xyJ.y - xyJ.x - 2.0 * iXJ) * step(3.0 * fYJ, xyJ.w - xyJ.z - 2.0 * iYJ); // >= 3 px on screen
+                      vec3 pCJ = vB5 + e1J * (0.5 * (xyJ.x + xyJ.y)) + e2J * (0.5 * (xyJ.z + xyJ.w));
+                      idRJ = vec2(floor(dot(pCJ.xz, tgJ) / 3.0), floor(pCJ.y / 2.95)) + baseIdJ;
+                      regraJ = 1.0; falhaJ = 5.0;
+                    }
+                  } else {
+                    // a dark band running > 2.4 m both ways = a balcony shadow (or a ribbon window), not a window: light the window behind
+                    // the balcony as a clean bay rectangle of the grid inside the band height (the parapet at the bottom stays dark)
+                    float BJ = cJ.y - nbJ.y, TJ = cJ.y + nbJ.x;
+                    float h0J = dot(vB5, e2J);
+                    BJ = floor((h0J + BJ) * 20.0 + 0.5) * 0.05 - h0J; TJ = floor((h0J + TJ) * 20.0 + 0.5) * 0.05 - h0J;
+                    float sEJ = dot(vB5.xz, e1J.xz) / 3.0, fxJ = fract(sEJ);
+                    float dXJ = min(fxJ - 0.2, 0.8 - fxJ) * 3.0;
+                    float dYJ = min(-(BJ + 0.05 + 0.28 * altJ), TJ - 0.05 - 0.08 * altJ);
+                    mRJ = smoothstep(-0.5 * fXJ, 0.5 * fXJ, dXJ) * smoothstep(-0.5 * fYJ, 0.5 * fYJ, dYJ);
+                    mRJ *= step(3.0 * fXJ, 1.8) * step(3.0 * fYJ, 0.64 * altJ - 0.1);
+                    idRJ = vec2(floor(sEJ) + 37.0, floor((vB5.y + 0.5 * (BJ + TJ)) / 2.95)) + baseIdJ;
+                    regraJ = 2.0; falhaJ = 5.0;
+                  }
+                }
+              }
+            }
+          } else {
+            // FAR (a window is a few pixels): one window rectangle per floor x bay cell of the grid, lit only where the photo shows glass at
+            // that cell's window; the wall level is read around the cell, so the whole cell decides together
+            vec2 gcJ = floor(gqJ), gfJ = fract(gqJ);
+            vec2 dCJ = vec2((0.5 - gfJ.x) * 3.0 * sgJ, (0.55 - gfJ.y) * 2.95);
+            vec2 uvCJ = vMapUv + jJ * dCJ;
+            vec3 sW = vec3(0.0);
+            for (int a = 0; a < 4; a++) { float angJ = float(a) * 1.5708 + 0.7854; sW += textureLod(map, uvCJ + (jJ[0] * cos(angJ) + jJ[1] * sin(angJ)) * 2.0, lodRJ).rgb; }
+            float lWF = max(G3DL(sW * 0.25), 0.03);
+            vec3 cCJ = textureLod(map, uvCJ, max(log2(max(kJ * 0.7, 1e-4)), lodNJ)).rgb;
+            float mxC = sqrt(max(cCJ.r, max(cCJ.g, cCJ.b))), mnC = sqrt(min(cCJ.r, min(cCJ.g, cCJ.b))), satC = (mxC - mnC) / (mxC + 0.15);
+            float vidroC = max(1.0 - smoothstep(0.20, 0.34, satC), step(cCJ.r * 1.03, cCJ.b) * (1.0 - smoothstep(0.40, 0.55, satC)));
+            mascVerJ = step(G3DL(cCJ) / lWF, uJanG.y + 0.06) * step(0.5, vidroC);
+            if (mascVerJ > 0.5) {
+              float jgJ = smoothstep(0.22 - gwJ.x, 0.22 + gwJ.x, gfJ.x) * (1.0 - smoothstep(0.78 - gwJ.x, 0.78 + gwJ.x, gfJ.x))
+                        * smoothstep(0.30 - gwJ.y, 0.30 + gwJ.y, gfJ.y) * (1.0 - smoothstep(0.80 - gwJ.y, 0.80 + gwJ.y, gfJ.y));
+              mRJ = mix(jgJ, 0.28, smoothstep(0.25, 0.5, max(gwJ.x, gwJ.y)));
+              idRJ = gcJ + baseIdJ + vec2(0.0, 203.0);
+              regraJ = 3.0;
+            }
+          }
+          if (mRJ > 0.001) {
+            float ligaJ = uJanG.w > 3.5 ? 1.0 : step(g3dH21(idRJ), occJ); // view 4 = every detected window lit (tests)
+            float cortJ = step(g3dH21(idRJ + 5.7), 0.3);
+            vec3 corJ = mix(vec3(1.0, 0.64, 0.36), vec3(1.0, 0.82, 0.62), g3dH21(idRJ + 7.3)) * mix(vec3(1.0), vec3(1.0, 0.88, 0.72), cortJ);
+            float fJ = (0.55 + 0.45 * g3dH21(idRJ + 3.1)) * mix(1.0, 0.55, cortJ);
+            emJ = corJ * fJ * mRJ * ligaJ;
+            covJ = mRJ * ligaJ;
+            fotoLigaJ = covJ;
+          }
+          if (pobreJ > 0.001) {
+            vec2 gfJ = fract(gqJ), gcJ = floor(gqJ);
+            float jgJ = smoothstep(0.22 - gwJ.x, 0.22 + gwJ.x, gfJ.x) * (1.0 - smoothstep(0.78 - gwJ.x, 0.78 + gwJ.x, gfJ.x))
+                      * smoothstep(0.30 - gwJ.y, 0.30 + gwJ.y, gfJ.y) * (1.0 - smoothstep(0.80 - gwJ.y, 0.80 + gwJ.y, gfJ.y));
+            jgJ = mix(jgJ, 0.28, smoothstep(0.25, 0.5, max(gwJ.x, gwJ.y)));
+            vec2 idG = gcJ + baseIdJ + vec2(0.0, 101.0);
+            float ligaG = step(g3dH21(idG), occJ) * step(1.0, gcJ.y);
+            float cortG = step(g3dH21(idG + 5.7), 0.3);
+            vec3 corG = mix(vec3(1.0, 0.64, 0.36), vec3(1.0, 0.82, 0.62), g3dH21(idG + 7.3)) * mix(vec3(1.0), vec3(1.0, 0.88, 0.72), cortG);
+            float fG = (0.55 + 0.45 * g3dH21(idG + 3.1)) * mix(1.0, 0.55, cortG);
+            emJ = mix(emJ, corG * fG * jgJ * ligaG, pobreJ);
+            covJ = mix(covJ, jgJ * ligaG, pobreJ);
+          }
+        }
+      }
+      covJ *= geoJ; emJ *= geoJ;
+      if (covJ > 0.0) outgoingLight = mix(outgoingLight, 0.55 * uJanG.x * emJ / covJ, uNoiteG * covJ);
+      if (uJanG.w > 0.5) {
+        // test views: 1 = which pixels start a window test (white dark glass, grey light glass, far: the cell test); 2 = contrast / texels;
+        // 3 = which rule lit it (orange photo window, magenta balcony band, yellow far cell, cyan blur grid)
+        // 5 = where the near test stopped (red step 1 size, yellow step 2 fixed point, blue compactness, magenta straight edges, green lit rectangle)
+        if (uJanG.w > 4.5) outgoingLight = outgoingLight * 0.2 + (falhaJ == 1.0 ? vec3(1.0, 0.0, 0.0) : falhaJ == 2.0 ? vec3(1.0, 1.0, 0.0) : falhaJ == 3.0 ? vec3(0.0, 0.3, 1.0) : falhaJ == 4.0 ? vec3(1.0, 0.0, 1.0) : falhaJ == 5.0 ? vec3(0.0, 1.0, 0.0) : falhaJ == 6.0 ? vec3(0.0, 1.0, 1.0) : vec3(0.0)) * geoJ;
+        else
+        outgoingLight = uJanG.w < 1.5 ? vec3(mascVerJ * geoJ * (1.0 - verdeJ)) : uJanG.w < 2.5 ? vec3(clamp(contJ * 2.0, 0.0, 1.0), clamp(kJ / 6.0, 0.0, 1.0), pobreJ) * geoJ
+          : outgoingLight * (uJanG.w > 3.5 ? 0.15 : 0.4) + (regraJ == 1.0 ? vec3(1.0, 0.5, 0.0) : regraJ == 2.0 ? vec3(1.0, 0.0, 1.0) : vec3(1.0, 0.9, 0.0)) * fotoLigaJ * (1.0 - pobreJ) * geoJ + vec3(0.0, 0.6, 1.0) * covJ * pobreJ;
+      }
+    }
+#undef G3DRAS0
+#undef G3DKMIN
+#undef G3DPERTO
+#undef G3DIN
+#undef G3DMA
+#undef G3DLCLIGA
+#undef G3DLC2
+#undef G3DLC
+#undef G3DL
+#endif
+
+`;
 const LUZ_GLSL = `
   {
     vec3 cB = outgoingLight;
+    // night: the photo's daylight colour does not survive the dark (red facades stayed vivid orange); keep a third of the chroma
+    cB = mix(cB, vec3(dot(cB, vec3(0.2126, 0.7152, 0.0722))), 0.66 * uNoiteG);
     outgoingLight = g3dGrade(cB * uLuz, uGrade); // C7 21/10: day grade (identity at night and in the window photo shots)
     if (uNoiteG > 0.001 && uTerrExt > 0.0${typeof location !== "undefined" && /[?&]g3dlz=0/.test(location.search) ? " && false" : ""}) { // ?g3dlz=0: street-light pools off (tests)
       vec2 rq = (vB5.xz + uTerrExt) / (2.0 * uTerrExt);
@@ -109,7 +460,11 @@ const LUZ_GLSL = `
         outgoingLight += uNoiteG * (lz.r * vec3(1.0, 0.56, 0.22) + lz.g * vec3(1.0, 0.82, 0.6)) * cB * 1.6 * (1.0 - smoothstep(1.0, 10.0, hrua));
       }
     }
-    if (uNoiteG > 0.001) {
+    // Redesign 14/11 (correcao-3d): the old grid windows below stay off. They were cut from world-space grids on photogrammetry
+    // that is not planar (balconies, wobble), so close up they floated off the facades as crooked stickers (review of zoom/03).
+    // The city's lit windows now come from the tile photo itself (JAN_GLSL, after this block).
+    // ?g3djan=1 (tests only) brings the old windows back for comparison; ?g3djan=0 = no windows at all.
+    if (uNoiteG > 0.001 && ${typeof location !== "undefined" && /[?&]g3djan=1/.test(location.search) ? "true" : "false"}) {
       vec3 nB = normalize(cross(dFdx(vB5), dFdy(vB5)));
       bool verde = cB.g > cB.r * 1.08 && cB.g > cB.b * 1.04;
       float hLocJ = vB5.y;
@@ -258,10 +613,11 @@ const LUZ_GLSL = `
         float lum = dot(cB, vec3(0.2126, 0.7152, 0.0722));
         float vidro = 1.0 - smoothstep(0.18, 0.5, lum);
         vec3 quente = mix(vec3(1.0, 0.72, 0.42), vec3(0.95, 0.9, 0.82), step(0.82, g3dH21(cel + 7.0)));
-        float forca = 0.12 + 0.88 * pow(g3dH21(cel + 3.0), 2.2);
-        outgoingLight += uNoiteG * acesa * mix(0.5, 1.0, vidro) * quente * forca * 0.85;
+        float forca = 0.32 + 0.68 * pow(g3dH21(cel + 3.0), 1.4);
+        outgoingLight += uNoiteG * acesa * mix(0.5, 1.0, vidro) * quente * forca * 0.95;
       }
     }
+${JAN_GLSL}
   }`;
 const FANT_GLSL = `
 uniform sampler2D uMapaP; uniform vec4 uMapaR; uniform vec3 uCamB5; uniform vec3 uAlvoB5; uniform sampler2D uTerr; uniform float uTerrExt;
@@ -333,7 +689,7 @@ function luzDaCidade(el) {
   const base = [1, 1, 1].map((v, i) => {
     let x = v;
     x += ([0.9, 0.95, 1.06][i] - x) * azul * 0.6;
-    x += ([0.62, 0.74, 1.05][i] - x) * noite;
+    x += ([0.8, 0.86, 1.02][i] - x) * noite;
     return x * k;
   });
   return { base, luzes: fatorLuzesNoite(e) * (1 - smooth(-7, 0, e)) };
@@ -341,6 +697,28 @@ function luzDaCidade(el) {
 let sessao = null;
 const STATUS = { estado: "parado", erro: null, raiz: 0, bytes: 0, tiles: 0 };
 if (typeof window !== "undefined") window.__g3d = STATUS;
+// 09/11: short record of the Google session in the console ("[g3d] ..."), to explain a window without the city on the machine where it happens.
+// In the module frame, to copy it: copy(__g3dRegistro.join(String.fromCharCode(10))). One line per change, at most one every 5 s, the last 240 kept; no address or key goes in.
+const REGISTRO = [];
+if (typeof window !== "undefined") window.__g3dRegistro = REGISTRO;
+function registra(txt) {
+  const l = `[g3d] ${(performance.now() / 1e3).toFixed(1)}s ${String(txt).replace(/https?:\/\/\S+/g, "(url)").replace(/key=[^&\s"]+/g, "key=...")}`;
+  REGISTRO.push(l);
+  if (REGISTRO.length > 240) REGISTRO.shift();
+  console.info(l);
+}
+function vigiaRegistro(s) {
+  let ant = "", vez = 0;
+  setInterval(() => {
+    const t = s.tiles, st = t.stats || {}, v = s.vistaJanela, F = v && v.foto, R = v && v._reg || {}, dono = s.dono ? s.dono.ehJanela ? "janela" : "cena" : "nenhum", n = (x) => x || 0;
+    const pedidos = n(st.queued) + n(st.downloading) + n(st.parsing);
+    const sig = [STATUS.estado, STATUS.erro, dono, n(st.visible), n(st.failed), pedidos > 0, v && v.pronto, v && v._fase1, v && v._fim, v && v.ativo, s.vis.fora, F && F.feito].join("|");
+    if (sig === ant) return;
+    ant = sig;
+    const op = v && v.opacidade ? v.opacidade().toFixed(2) : "-";
+    registra(`#${++vez} sessao=${STATUS.estado} erro=${STATUS.erro || "-"} nivel=${capacidade().nivel} foto=${MODO_FOTO ? 1 : 0} dono=${dono} tiles fila=${n(st.queued)} baixando=${n(st.downloading)} processando=${n(st.parsing)} visiveis=${n(st.visible)} carregados=${n(st.loaded)} falhos=${n(st.failed)} cacheMB=${Math.round(t.lruCache.cachedBytes / 1048576)} janela=${v ? `pronto:${v.pronto ? 1 : 0} forca:${op} fase1:${v._fase1 === false ? 0 : 1} fim:${v._fim ? 1 : 0} desenhos:${n(R.des)} soCarga:${n(R.so)} semAlvo:${n(R.semAlvo)}${F ? ` faces:${F.i}/${F.faces.length} feito:${F.feito ? 1 : 0}` : ""}` : "ainda-nao"} fora-da-tela=${s.vis.fora ? 1 : 0}`);
+  }, 5e3);
+}
 if (typeof window !== "undefined") window.__g3dC8 = { C8, aplicar(o) {
   Object.assign(C8, o || {});
   DESPRE.value = C8.msaa ? 1 : 0;
@@ -355,13 +733,16 @@ function iniciarGoogle() {
     const chave = await chaveDaPagina();
     if (!chave || desligadoPorUrl()) {
       STATUS.estado = "sem-chave";
+      registra(`sessao=sem-chave motivo=${chave ? "google3d=0 na URL" : "chave ausente"}`);
       return null;
     }
     if (!capacidade().google) {
       STATUS.estado = "aparelho-leve";
+      registra(`sessao=aparelho-leve motivo=nivel ${capacidade().nivel}`);
       return null;
     }
     STATUS.estado = "carregando";
+    registra(`sessao=carregando nivel=${capacidade().nivel} foto=${MODO_FOTO ? 1 : 0}`);
     try {
       const [{ TilesRenderer }, { GoogleCloudAuthPlugin }] = await Promise.all([import(`${CDN}index.js`), import(`${CDN}index.core-plugins.js`)]);
       const tiles = new TilesRenderer();
@@ -480,7 +861,7 @@ function iniciarGoogle() {
         prof: { value: 0 },
         luz: { value: new THREE.Vector3(1, 1, 1) },
         noite: { value: 0 },
-        frac: { value: 0.25 },
+        frac: { value: 0.34 },
         perto: { value: 0 },
         janB: { value: Array.from({ length: 64 }, () => new THREE.Vector4()) },
         janN: { value: 0 },
@@ -488,6 +869,7 @@ function iniciarGoogle() {
         janDetOk: { value: 0 },
         janMap: { value: null },
         janHora: { value: 1260 },
+        janG: { value: new THREE.Vector4(JAN_G0[0], JAN_G0[1], JAN_G0[2], 0) },
         grade: { value: new THREE.Vector4(1, 1, 1, 0.18) },
         nit: { value: C8.nitidez },
         viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) },
@@ -503,6 +885,7 @@ function iniciarGoogle() {
         lote: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) },
         loteN: { value: 0 }
       };
+      if (typeof window !== "undefined") window.__g3dJanG = s.recorte.janG;
       const shaderRecorte = (sh) => {
         sh.uniforms.uLote = s.recorte.lote;
         sh.uniforms.uLoteN = s.recorte.loteN;
@@ -522,6 +905,7 @@ function iniciarGoogle() {
         sh.uniforms.uJanDetOk = s.recorte.janDetOk;
         sh.uniforms.uJanMap = s.recorte.janMap;
         sh.uniforms.uJanHora = s.recorte.janHora;
+        sh.uniforms.uJanG = s.recorte.janG;
         sh.uniforms.uGrade = s.recorte.grade;
         sh.uniforms.uNitG = s.recorte.nit;
         sh.uniforms.uViz = s.recorte.viz;
@@ -535,7 +919,7 @@ function iniciarGoogle() {
         sh.uniforms.uAng = s.recorte.ang;
         sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = "uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;");
-        sh.fragmentShader = "uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\nuniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n" + GRADE_GLSL + "uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform vec4 uJanB[64];\nuniform float uJanN;\nuniform sampler2D uJanDet;\nuniform highp sampler2D uJanMap;\nuniform float uJanHora;\nuniform float uJanDetOk;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n" + FANT_GLSL + sh.fragmentShader.replace("#include <map_fragment>", NIT_GLSL).replace("#include <opaque_fragment>", LUZ_GLSL + "\n#include <opaque_fragment>").replace(
+        sh.fragmentShader = "uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\nuniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n" + GRADE_GLSL + "uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform vec4 uJanB[64];\nuniform float uJanN;\nuniform sampler2D uJanDet;\nuniform highp sampler2D uJanMap;\nuniform float uJanHora;\nuniform vec4 uJanG;\nuniform float uJanDetOk;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n" + FANT_GLSL + sh.fragmentShader.replace("#include <map_fragment>", NIT_GLSL).replace("#include <opaque_fragment>", LUZ_GLSL + "\n#include <opaque_fragment>").replace(
           "void main() {",
           "void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;\n#ifndef G3D_PLANO\n  if (uVizN > 0.5 && g3dNoViz(vB5)) discard;\n#endif"
         );
@@ -593,7 +977,7 @@ function iniciarGoogle() {
         STATUS.luz = { el: Number.isFinite(el) ? +el.toFixed(2) : null, base: L.base.map((x) => +x.toFixed(4)), luzes: +L.luzes.toFixed(4), grade: Gr };
       };
       await new Promise((ok, falha) => {
-        const t = setTimeout(() => falha(new Error("timeout da raiz")), 2e4);
+        const t = setTimeout(() => falha(new Error("timeout da raiz")), 6e4);
         const aoRaiz = () => {
           clearTimeout(t);
           STATUS.raiz++;
@@ -619,14 +1003,19 @@ function iniciarGoogle() {
         (auth.auth || auth).sessionToken = sessaoHeroi;
         STATUS.sessaoPartilhada = true;
       }
+      let errosReg = 0;
       tiles.addEventListener("load-error", (ev) => {
         STATUS.erro = String(ev.error && ev.error.message || ev.error).slice(0, 160);
+        if (++errosReg <= 20) registra(`tile falhou (${errosReg}): ${STATUS.erro}`);
       });
       STATUS.estado = "pronto";
+      registra("sessao=pronto (raiz recebida)");
+      vigiaRegistro(s);
       return s;
     } catch (e) {
       STATUS.estado = "falhou";
       STATUS.erro = String(e && e.message || e).slice(0, 160);
+      registra(`sessao=falhou motivo=${STATUS.erro}`);
       return null;
     }
   })();
@@ -655,6 +1044,10 @@ class VistaGoogle {
     for (const ev of ["load-model", "tiles-load-end", "needs-update", "tile-visibility-change"]) s.tiles.addEventListener(ev, this._aoCarregar);
     this.credito = this.montaCredito();
     this.ehJanela = true;
+    s.vistaJanela = this;
+    registra("janela: vista criada");
+    renderer.domElement.addEventListener("webglcontextlost", () => registra("janela: contexto grafico perdido"));
+    renderer.domElement.addEventListener("webglcontextrestored", () => registra("janela: contexto grafico restaurado"));
   }
   ligaNaCena() {
     const { lat, lon, h, ajuste } = this.ref;
@@ -957,6 +1350,8 @@ class VistaGoogle {
     R.ret.value.set(1, 1, 0, 0);
   }
   desenha(dir, fov, aspect, janela, soCarregar = false, dirV = null) {
+    const reg = this._reg || (this._reg = { des: 0, so: 0, semAlvo: 0 });
+    reg[!this.rt ? "semAlvo" : soCarregar ? "so" : "des"]++;
     if (!this.rt) return;
     const d = this.dirParaL(dir.x, dir.y, dir.z);
     this.cam.position.set(0, 0, 0);
@@ -1798,6 +2193,7 @@ class VistaGoogle {
     if (el && el.textContent !== txt) el.textContent = txt;
   }
   liberar() {
+    registra("janela: vista liberada");
     this.ativo = false;
     if (this._laco) cancelAnimationFrame(this._laco);
     for (const ev of ["load-model", "tiles-load-end", "needs-update", "tile-visibility-change"]) this.s.tiles.removeEventListener(ev, this._aoCarregar);
