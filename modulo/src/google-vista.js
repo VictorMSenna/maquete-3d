@@ -36,7 +36,12 @@ const FOTO_MIN = +(typeof location !== "undefined" && new URLSearchParams(locati
 const FOTO_MB = (+(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfmb")) || (capacidade().nivel === "topo" ? capacidade().movel ? 900 : 1500 : capacidade().tilesMB)) * 1048576;
 const FOTO_N = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfn")) || (capacidade().nivel === "topo" ? 4 : 2);
 const RAPIDO = !(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfr") === "0");
-const ERRO_RAPIDO = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gferr2")) || ERRO_FOTO * 3;
+// 25/11 (owner approved): the window photo is ONE pass. Measured on the balcony (varanda), phone 390x844: the old second, detailed pass
+// (error 6 at 2048 px per face) downloaded 2.0-2.35 GB in 5-7 min at 100 Mbit/s for a picture next to identical to the quick pass
+// alone (261 MB); the mid phones' detail pass (14 at 1536) was 428 MB. Top phones keep 18 px at 2048, the others 14 at 1536 (their
+// old final look). ?gferr2= still overrides; ?gdet=1 brings the old second pass back (A/B only).
+const ERRO_RAPIDO = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gferr2")) || (capacidade().nivel === "topo" ? ERRO_FOTO * 3 : ERRO_FOTO);
+const SO_RAPIDA = !(typeof location !== "undefined" && new URLSearchParams(location.search).get("gdet") === "1");
 const FASE1_K = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("g1k")) || 3;
 const desligadoPorUrl = () => /[?&]google3d=0/.test(location.search);
 async function chaveDaPagina() {
@@ -1324,6 +1329,7 @@ class VistaGoogle {
     return this.dirsV ? this.janelaNaTela(camera, this.dirsV) : { x0: -1, y0: -1, x1: 1, y1: 1 };
   }
   janelaNaTela(camera, dirs) {
+    if (!dirs && camera) this._camTela = camera;   // 25/11: the tour camera, so the window photo starts with the side on screen
     const d = dirs || this.dirs;
     if (!d) return { x0: -1, y0: -1, x1: 1, y1: 1 };
     const m = camera.matrixWorldInverse.elements, p = camera.projectionMatrix.elements;
@@ -1451,9 +1457,27 @@ class VistaGoogle {
         if (v.z < 1 && v.z > -1 && Math.abs(v.x) <= 1.02 && Math.abs(v.y) <= 1.02) n++;
       }
       else n = 1;
-      if (n) out.push([i, n]);
+      let m = 0;
+      const C = this._camTela;
+      if (C && d) {
+        const me = C.matrixWorldInverse.elements, pe = C.projectionMatrix.elements;
+        for (let k = 0; k < d.length; k += 3) {
+          v.copy(this.dirParaL(d[k], d[k + 1], d[k + 2])).multiplyScalar(100).project(cam);
+          if (!(v.z < 1 && v.z > -1 && Math.abs(v.x) <= 1.02 && Math.abs(v.y) <= 1.02)) continue;
+          const x = d[k], y = d[k + 1], z = d[k + 2];
+          const vx = me[0] * x + me[4] * y + me[8] * z, vy = me[1] * x + me[5] * y + me[9] * z, vz = me[2] * x + me[6] * y + me[10] * z;
+          if (vz > -0.05) continue;
+          const sx = (pe[0] * vx + pe[8] * vz) / -vz, sy = (pe[5] * vy + pe[9] * vz) / -vz;
+          if (Math.abs(sx) <= 1.1 && Math.abs(sy) <= 1.1) m++;
+        }
+      }
+      if (n) out.push([i, n, m]);
     }
-    return out.sort((a, b) => b[1] - a[1]).slice(0, 4).map((x) => x[0]);
+    out.sort((a, b) => b[2] - a[2] || b[1] - a[1]);
+    // 25/11: with the tour camera known, only the faces whose glass is on screen (at least 1 sample); the rest come when the visitor
+    // turns to them (passoFoto). Before the camera is known: all, by amount of glass (old rule).
+    const tela = this._camTela && SO_RAPIDA ? out.filter((x) => x[2] > 0) : out;
+    return (tela.length ? tela : out).slice(0, 4).map((x) => x[0]);
   }
   passoFoto() {
     if (!this.foto) {
@@ -1555,6 +1579,45 @@ class VistaGoogle {
         c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB);
       }
     }
+    if (SO_RAPIDA && this._camTela && F2.nRapido === 0 && !F2.ordenado) {   // 25/11: the first face captured is the one on screen
+      F2.ordenado = true;
+      const nova = this.facesDaJanela().filter((f) => F2.faces.includes(f));
+      if (nova.length) {
+        const ord = nova.map((f) => F2.faces.indexOf(f));
+        F2.faces = ord.map((i) => F2.faces[i]);
+        const sobra = F2.alvos.filter((_, i) => !ord.includes(i));
+        F2.alvos = ord.map((i) => F2.alvos[i]);
+        for (const a of sobra) { a.A.dispose(); a.W.dispose(); }
+        F2.mats = F2.faces.map((f) => new THREE.Matrix4().multiplyMatrices(F2.cams[f].projectionMatrix, F2.cams[f].matrixWorldInverse));
+        F2.tR0 = agora;
+      }
+    }
+    if (SO_RAPIDA && this._camTela && F2.faces.length < 4 && agora - (F2.tVer || 0) > 400) {   // 25/11: a face that came on screen joins
+      F2.tVer = agora;
+      const novas = this.facesDaJanela().filter((f) => !F2.faces.includes(f)).slice(0, 4 - F2.faces.length);
+      if (novas.length) {
+        if (F2.feito) {
+          F2.feito = false;
+          this.restauraCache();
+          const c = this.s.tiles.lruCache;
+          this._guardaCache();
+          c.minBytesSize = 0;
+          c.unloadPercent = 1;
+          c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB);
+        }
+        F2.nRapido = Math.min(F2.nRapido, F2.faces.length);
+        this._pFfim = false;   // the loading bar comes back for the new side
+        this._pF = 0;
+        F2.tR0 = agora;
+        F2.quietosR = 0;
+        F2.semFilaR = 0;
+        for (const f of novas) {
+          F2.faces.push(f);
+          F2.alvos.push({ A: alvo(FOTO_LADO), W: alvo(FOTO_LADO_W) });
+          F2.mats.push(new THREE.Matrix4().multiplyMatrices(F2.cams[f].projectionMatrix, F2.cams[f].matrixWorldInverse));
+        }
+      }
+    }
     if (F2.feito || !F2.faces.length) {
       if (!F2.faces.length && !F2.feito) {
         F2.feito = true;
@@ -1597,8 +1660,8 @@ class VistaGoogle {
       const st2 = t2.stats, pend2 = st2.queued + st2.downloading + st2.parsing, tempo2 = agora - F2.tR0;
       F2.semFilaR = pend2 === 0 ? (F2.semFilaR || 0) + 1 : 0;
       F2.quietosR = pend2 === 0 && (t2.loadProgress === void 0 || t2.loadProgress >= 1 || F2.semFilaR >= 30) ? (F2.quietosR || 0) + 1 : 0;
-      F2.prog = Math.min(0.99, (fr + 0.5) / F2.faces.length) * 0.5;
-      if (F2.quietosR >= 3 && tempo2 > 150 || tempo2 > 15e3) {
+      F2.prog = Math.min(0.99, (fr + 0.5) / F2.faces.length) * (SO_RAPIDA ? 1 : 0.5);
+      if (F2.quietosR >= 3 && tempo2 > 150 || tempo2 > (SO_RAPIDA ? 12e4 : 15e3)) {   // 25/11: no cut at 15 s (half-loaded face = blocks in the horizon)
         const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F2.alvos[fr];
         const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
         r.setClearColor(0, 0);
@@ -1631,11 +1694,21 @@ class VistaGoogle {
         F2.semFilaR = 0;
         F2.i = Math.max(F2.nRapido, F2.k);
         F2.t0 = agora;
-        if (F2.nRapido >= F2.faces.length && !this.pronto) {
+        if (F2.nRapido >= (SO_RAPIDA ? 1 : F2.faces.length) && !this.pronto) {   // 25/11: the city shows with the first face (the one on screen)
           this.pronto = true;
           this.tPronto = agora;
         }
         this.atualizaCredito();
+        if (SO_RAPIDA && F2.nRapido >= F2.faces.length) {   // 25/11: done after the quick pass (see ERRO_RAPIDO)
+          F2.feito = true;
+          STATUS.tiles = st2.visible || 0;
+          if (capacidade().nivel === "topo") this.restauraCache();
+          else this.soltaCache();
+          try {
+            localStorage.removeItem(chaveLocal("tabela3d-foto-ativa"));
+          } catch (e) {
+          }
+        }
       }
       this.acordar();
       return;

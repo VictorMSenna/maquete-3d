@@ -78061,7 +78061,8 @@
    175,
    170
   ],
-  "noiteFundo": 0
+  "noiteFundo": 0,
+  "previas": ".p.webp"
  },
  "apartamento": {
   "area_m2": 183.0,

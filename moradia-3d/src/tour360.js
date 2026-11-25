@@ -242,6 +242,7 @@ async function criar({
   let yaw = 0, pitch = 0, fov = innerHeight > innerWidth ? 90 : 75;
   const RAIO = 5;
   const esferas = /* @__PURE__ */ new Map();
+  const baixadosFundo = new Set();   // 25/11: files fetched in the background (adiantar, below)
   const NITIDO = !/[?&]nitido=0/.test(location.search);
   const NITIDO_GLSL = `
 vec4 amostraNitida(sampler2D t, vec2 uv) {
@@ -279,6 +280,7 @@ vec4 amostraNitida(sampler2D t, vec2 uv) {
       else e.refinar = true;
     };
     mix.refLuz = REF_LUZ;
+    mix.baixados = baixadosFundo;
     const e = { m, mix, pronto: null, refinar: false };
     esferas.set(id, e);
     return e;
@@ -306,8 +308,88 @@ vec4 amostraNitida(sampler2D t, vec2 uv) {
       if (G && VG.cobre(id)) { G.vidro = false; botaoReflexo(); }
     }
     if (G && id === pontoVisivel()) { G.aposPintar(id, e); if (!VG) botoesLuz(); }
+    if (id === pontoVisivel()) adiantar.agenda();
     return e;
   }
+  // 25/11 (owner request): while the visitor looks at a room, the files of
+  // the same room in the other mode (day <-> night) and then of the neighbouring rooms are fetched one at a time into the browser's
+  // HTTP cache (plain fetch, nothing decoded, no GPU memory). When the visitor goes there, the full layers are already on the phone
+  // and the preview step is skipped (render-mix only uses previews for layers not yet decoded, and decoding is fast).
+  // Only on MORADIA, after the view is complete and the city of the window is not loading; never with "save data" on; with a known
+  // slow link (connection type 2g/3g) only the other mode of the same room; at most ~160 MB per visit. ?adiantar=0 turns it off (A/B).
+  const adiantar = (() => {
+    const feitos = new Set(), baixados = baixadosFundo, K = new URLSearchParams(location.search);
+    let fila = null, tm = 0, mb = 0, ativo = false;
+    const con = typeof navigator !== "undefined" ? navigator.connection : null;
+    const desligado = () => !MORADIA || K.get("adiantar") === "0" || (con && con.saveData);
+    const lento = () => !!con && /^(slow-2g|2g|3g)$/.test(con.effectiveType || "");
+    const ehNoite = (min) => min < 6 * 60 + 30 || min > 18 * 60;
+    const arqs = (P, noite) => {
+      const C = P.camadas || {}, out = [];
+      const add = (c, kb) => { if (c) out.push([c, kb || 0]); };
+      if (C.ceu) add(C.ceu.arq, C.ceu.kb);
+      if (C.fora) add(C.fora.arq, C.fora.kb);
+      if (noite) {
+        const ev = esferas.get(pontoVisivel()), comLo = !!(ev && ev.mix && ev.mix.comLo);
+        for (const c of Object.values(C)) if (c && c.grupos && c.arq) { add(c.arq, c.kb); if (comLo && c.lo) add(c.lo, c.kb_lo); }   // the 12-bit complement too, when this device draws it
+      } else {
+        if (C.albedo) add(C.albedo.arq, C.albedo.kb);
+        if (C.normal) add(C.normal.arq, C.normal.kb);
+        const est = estado.estacao, sv = C.solvis && C.solvis[est], si = C.solind && C.solind[est];
+        if (sv) for (const a of [].concat(sv.arq)) add(a, (sv.kb || 0) / [].concat(sv.arq).length);
+        if (si) {
+          const hs = Object.keys(si).map((h) => [h, Math.abs(+h.slice(0, 2) * 60 + +h.slice(3, 5) - estado.minutos)]).sort((a, b) => a[1] - b[1]).slice(0, 2);
+          for (const [h] of hs) add(si[h].arq, si[h].kb);
+        }
+      }
+      return out;
+    };
+    const monta = () => {
+      const P0 = PTS[pontoVisivel()];
+      if (!P0) return [];
+      const noite = ehNoite(estado.minutos), out = [...arqs(P0, !noite)];
+      if (!lento()) for (const v of P0.vizinhos || []) if (PTS[v]) out.push(...arqs(PTS[v], noite), ...arqs(PTS[v], !noite));
+      // the main layers of every room first, the 12-bit complements (-lo) after: with the -lo inline the ~160 MB ran out before the
+      // kitchen was reached from the living room at night (VER-POSD 12a)
+      const lo = (x) => /-lo\.webp$/.test(x[0]);
+      return [...out.filter((x) => !lo(x)), ...out.filter(lo)].filter(([a]) => !feitos.has(a));
+    };
+    const ocupado = () => {
+      const cg = raiz.querySelector(".t360-g3d-carga");
+      const ev = esferas.get(pontoVisivel()), mx = ev && ev.mix;   // the room on screen still downloading its full layers
+      const baixando = mx && mx.emUso && [...mx.emUso].some((a) => !a.endsWith(".p.webp") && !mx.prontas.has(a));
+      return document.hidden || baixando || (cg && !cg.hidden) || [...esferas.values()].some((e) => e.refinar);
+    };
+    async function passo() {
+      tm = 0;
+      if (fechado || desligado() || ativo) return;
+      if (ocupado()) { agenda(2500); return; }
+      if (!fila) fila = monta();
+      const it = fila.shift();
+      if (!it || mb > 160) return;
+      const [a, kb] = it;
+      if (feitos.has(a)) { agenda(50); return; }
+      feitos.add(a);
+      ativo = true;
+      try {
+        const r = await fetch(base + a, { priority: "low" });
+        await r.arrayBuffer();
+        if (r.ok) baixados.add(a);
+        mb += kb / 1024;
+      } catch (e) {
+      }
+      ativo = false;
+      agenda(150);
+    }
+    function agenda(ms = 1800) {
+      if (desligado()) return;
+      if (ms === 1800) fila = null;   // a new view: rebuild the list for this room and this hour
+      clearTimeout(tm);
+      tm = setTimeout(passo, ms);
+    }
+    if (K.has("teste")) window.__adiantar = () => ({ fila: fila && fila.length, mb: Math.round(mb), n: feitos.size, ocupado: ocupado(), ativo, desligado: desligado(), lento: lento() });
+    return { agenda, baixados };
+  })();
   const grupoHot = new THREE.Group();
   cena.add(grupoHot);
   const texHot = (() => {

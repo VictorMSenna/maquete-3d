@@ -36,7 +36,12 @@ const FOTO_MIN = +(typeof location !== "undefined" && new URLSearchParams(locati
 const FOTO_MB = (+(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfmb")) || (capacidade().nivel === "topo" ? capacidade().movel ? 900 : 1500 : capacidade().tilesMB)) * 1048576;
 const FOTO_N = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfn")) || (capacidade().nivel === "topo" ? 4 : 2);
 const RAPIDO = !(typeof location !== "undefined" && new URLSearchParams(location.search).get("gfr") === "0");
-const ERRO_RAPIDO = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gferr2")) || ERRO_FOTO * 3;
+// 25/11 (owner approved): the window photo is ONE pass. Measured on the balcony (varanda), phone 390x844: the old second, detailed pass
+// (error 6 at 2048 px per face) downloaded 2.0-2.35 GB in 5-7 min at 100 Mbit/s for a picture next to identical to the quick pass
+// alone (261 MB); the mid phones' detail pass (14 at 1536) was 428 MB. Top phones keep 18 px at 2048, the others 14 at 1536 (their
+// old final look). ?gferr2= still overrides; ?gdet=1 brings the old second pass back (A/B only).
+const ERRO_RAPIDO = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("gferr2")) || (capacidade().nivel === "topo" ? ERRO_FOTO * 3 : ERRO_FOTO);
+const SO_RAPIDA = !(typeof location !== "undefined" && new URLSearchParams(location.search).get("gdet") === "1");
 const FASE1_K = +(typeof location !== "undefined" && new URLSearchParams(location.search).get("g1k")) || 3;
 const desligadoPorUrl = () => /[?&]google3d=0/.test(location.search);
 async function chaveDaPagina() {
@@ -84,7 +89,21 @@ function matrizLocal(lat, lon, h, [dE = 0, dN = 0, dU = 0] = []) {
   );
   return m;
 }
+// 21/11 (Meta): blue cast of the aerial photo on NEUTRAL materials (concrete, plaster, light facades shot in shade read blue; the
+// suite side window looked blue, sat 0.40 vs 0.25 elsewhere). Pulled toward neutral only where the colour is blue-dominant AND of low
+// relative chroma, so blue glass, pools and the green park keep their colour (a plain shade desaturation turned the park grey, 20/11).
+// Applied to the photo colour BEFORE the light of the hour (the night tint and the lamps are not neutralised).
+// Strength from ?g3ddesazul=<0..1> for A/B, default 0.75.
+const DESAZUL = (() => { try { const v = parseFloat(new URLSearchParams(location.search).get('g3ddesazul')); return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.75; } catch (e) { return 0.75; } })();
 const GRADE_GLSL = `
+const float G3D_DESAZUL = ${DESAZUL.toFixed(3)};
+vec3 g3dDesazul(vec3 c) {
+  float y = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-5);
+  float az = smoothstep(0.03, 0.16, (c.b - max(c.r, c.g)) / y);   // blue above BOTH red and green: teal tree canopies (green ~ blue) stay out
+  float cr = (max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b))) / y;
+  float k = G3D_DESAZUL * az * (1.0 - smoothstep(0.45, 0.95, cr));
+  return mix(c, vec3(y) * vec3(1.015, 1.0, 0.975), k);
+}
 vec3 g3dGrade(vec3 c, vec4 g) {
   c *= g.x;
   float y = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-5);
@@ -100,7 +119,7 @@ vec3 g3dOmbro(vec3 x, vec2 o) {
 const LUZ_GLSL = `
   {
     vec3 cB = outgoingLight;
-    outgoingLight = g3dGrade(cB * uLuz, uGrade); // C7 21/10: day grade (identity at night and in the window photo shots)
+    outgoingLight = g3dGrade(g3dDesazul(cB) * uLuz, uGrade); // C7 21/10: day grade (identity at night and in the window photo shots)
     // 27/10 MORADIA (coordinator): at night, ground surfaces (< 10 m above the street-map terrain) use their albedo capped at
     // luminance G3D_CAP_CHAO (hue kept): pale concrete at night no longer reads like a dimmed day photo; partial by design
     // (pale concrete under street light is really lighter than asphalt). Target: E1 avenue crop ~1.2x the Upper street crop.
@@ -573,6 +592,7 @@ class VistaGoogle {
     return this.dirsV ? this.janelaNaTela(camera, this.dirsV) : { x0: -1, y0: -1, x1: 1, y1: 1 };
   }
   janelaNaTela(camera, dirs) {
+    if (!dirs && camera) this._camTela = camera;   // 25/11: the tour camera, so the window photo starts with the side on screen
     const d = dirs || this.dirs;
     if (!d) return { x0: -1, y0: -1, x1: 1, y1: 1 };
     const m = camera.matrixWorldInverse.elements, p = camera.projectionMatrix.elements;
@@ -692,9 +712,27 @@ class VistaGoogle {
         if (v.z < 1 && v.z > -1 && Math.abs(v.x) <= 1.02 && Math.abs(v.y) <= 1.02) n++;
       }
       else n = 1;
-      if (n) out.push([i, n]);
+      let m = 0;
+      const C = this._camTela;
+      if (C && d) {
+        const me = C.matrixWorldInverse.elements, pe = C.projectionMatrix.elements;
+        for (let k = 0; k < d.length; k += 3) {
+          v.copy(this.dirParaL(d[k], d[k + 1], d[k + 2])).multiplyScalar(100).project(cam);
+          if (!(v.z < 1 && v.z > -1 && Math.abs(v.x) <= 1.02 && Math.abs(v.y) <= 1.02)) continue;
+          const x = d[k], y = d[k + 1], z = d[k + 2];
+          const vx = me[0] * x + me[4] * y + me[8] * z, vy = me[1] * x + me[5] * y + me[9] * z, vz = me[2] * x + me[6] * y + me[10] * z;
+          if (vz > -0.05) continue;
+          const sx = (pe[0] * vx + pe[8] * vz) / -vz, sy = (pe[5] * vy + pe[9] * vz) / -vz;
+          if (Math.abs(sx) <= 1.1 && Math.abs(sy) <= 1.1) m++;
+        }
+      }
+      if (n) out.push([i, n, m]);
     }
-    return out.sort((a, b) => b[1] - a[1]).slice(0, 4).map((x) => x[0]);
+    out.sort((a, b) => b[2] - a[2] || b[1] - a[1]);
+    // 25/11: with the tour camera known, only the faces whose glass is on screen (at least 1 sample); the rest come when the visitor
+    // turns to them (passoFoto). Before the camera is known: all, by amount of glass (old rule).
+    const tela = this._camTela && SO_RAPIDA ? out.filter((x) => x[2] > 0) : out;
+    return (tela.length ? tela : out).slice(0, 4).map((x) => x[0]);
   }
   passoFoto() {
     if (!this.foto) {
@@ -796,6 +834,45 @@ class VistaGoogle {
         c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB);
       }
     }
+    if (SO_RAPIDA && this._camTela && F2.nRapido === 0 && !F2.ordenado) {   // 25/11: the first face captured is the one on screen
+      F2.ordenado = true;
+      const nova = this.facesDaJanela().filter((f) => F2.faces.includes(f));
+      if (nova.length) {
+        const ord = nova.map((f) => F2.faces.indexOf(f));
+        F2.faces = ord.map((i) => F2.faces[i]);
+        const sobra = F2.alvos.filter((_, i) => !ord.includes(i));
+        F2.alvos = ord.map((i) => F2.alvos[i]);
+        for (const a of sobra) { a.A.dispose(); a.W.dispose(); }
+        F2.mats = F2.faces.map((f) => new THREE.Matrix4().multiplyMatrices(F2.cams[f].projectionMatrix, F2.cams[f].matrixWorldInverse));
+        F2.tR0 = agora;
+      }
+    }
+    if (SO_RAPIDA && this._camTela && F2.faces.length < 4 && agora - (F2.tVer || 0) > 400) {   // 25/11: a face that came on screen joins
+      F2.tVer = agora;
+      const novas = this.facesDaJanela().filter((f) => !F2.faces.includes(f)).slice(0, 4 - F2.faces.length);
+      if (novas.length) {
+        if (F2.feito) {
+          F2.feito = false;
+          this.restauraCache();
+          const c = this.s.tiles.lruCache;
+          this._guardaCache();
+          c.minBytesSize = 0;
+          c.unloadPercent = 1;
+          c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB);
+        }
+        F2.nRapido = Math.min(F2.nRapido, F2.faces.length);
+        this._pFfim = false;   // the loading bar comes back for the new side
+        this._pF = 0;
+        F2.tR0 = agora;
+        F2.quietosR = 0;
+        F2.semFilaR = 0;
+        for (const f of novas) {
+          F2.faces.push(f);
+          F2.alvos.push({ A: alvo(FOTO_LADO), W: alvo(FOTO_LADO_W) });
+          F2.mats.push(new THREE.Matrix4().multiplyMatrices(F2.cams[f].projectionMatrix, F2.cams[f].matrixWorldInverse));
+        }
+      }
+    }
     if (F2.feito || !F2.faces.length) {
       if (!F2.faces.length && !F2.feito) {
         F2.feito = true;
@@ -838,8 +915,8 @@ class VistaGoogle {
       const st2 = t2.stats, pend2 = st2.queued + st2.downloading + st2.parsing, tempo2 = agora - F2.tR0;
       F2.semFilaR = pend2 === 0 ? (F2.semFilaR || 0) + 1 : 0;
       F2.quietosR = pend2 === 0 && (t2.loadProgress === void 0 || t2.loadProgress >= 1 || F2.semFilaR >= 30) ? (F2.quietosR || 0) + 1 : 0;
-      F2.prog = Math.min(0.99, (fr + 0.5) / F2.faces.length) * 0.5;
-      if (F2.quietosR >= 3 && tempo2 > 150 || tempo2 > 15e3) {
+      F2.prog = Math.min(0.99, (fr + 0.5) / F2.faces.length) * (SO_RAPIDA ? 1 : 0.5);
+      if (F2.quietosR >= 3 && tempo2 > 150 || tempo2 > (SO_RAPIDA ? 12e4 : 15e3)) {   // 25/11: no cut at 15 s (half-loaded face = blocks in the horizon)
         const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F2.alvos[fr];
         const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
         r.setClearColor(0, 0);
@@ -872,11 +949,21 @@ class VistaGoogle {
         F2.semFilaR = 0;
         F2.i = Math.max(F2.nRapido, F2.k);
         F2.t0 = agora;
-        if (F2.nRapido >= F2.faces.length && !this.pronto) {
+        if (F2.nRapido >= (SO_RAPIDA ? 1 : F2.faces.length) && !this.pronto) {   // 25/11: the city shows with the first face (the one on screen)
           this.pronto = true;
           this.tPronto = agora;
         }
         this.atualizaCredito();
+        if (SO_RAPIDA && F2.nRapido >= F2.faces.length) {   // 25/11: done after the quick pass (see ERRO_RAPIDO)
+          F2.feito = true;
+          STATUS.tiles = st2.visible || 0;
+          if (capacidade().nivel === "topo") this.restauraCache();
+          else this.soltaCache();
+          try {
+            localStorage.removeItem(chaveLocal("tabela3d-foto-ativa"));
+          } catch (e) {
+          }
+        }
       }
       this.acordar();
       return;
@@ -1520,7 +1607,7 @@ bool cubo(vec3 d, out vec4 g){
     else if (k == 2) { a = texture2D(fA2, uv); w = texture2D(fW2, uv).rgb; }
     else { a = texture2D(fA3, uv); w = texture2D(fW3, uv).rgb; }
     vec3 ac = despre > 0.5 && a.a > 0.0 ? a.rgb / a.a : a.rgb;
-    g = vec4(g3dGrade(ac * luzBase, gradeF) + w * luzesN, a.a);
+    g = vec4(g3dGrade(g3dDesazul(ac) * luzBase, gradeF) + w * luzesN, a.a);
     return true;
   }
   return false;

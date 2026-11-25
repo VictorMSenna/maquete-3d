@@ -67,6 +67,8 @@ uniform float joelho2[7];
 uniform float gamaL[7];
 uniform float y2[7];
 uniform float ymax[7];
+uniform float pvLin;
+uniform vec2 tTam[7];
 uniform float loIdx[7];
 uniform float semRefl;
 uniform float ehLuz[7];
@@ -86,6 +88,16 @@ vec3 decod(vec3 v, float kn, float kn2, float yb, float ym, float gL){
   vec3 meio = exp(clamp(v - kn, 0.0, kn2 - kn) / (kn2 - kn) * log(yb));
   vec3 alto = yb * exp(max(v - kn2, 0.0) / (1.0 - kn2) * log(ym / yb));
   return mix(mix(baixo, meio, step(kn, v)), alto, step(kn2, v));
+}
+// 23/11 (VER-POSD 9a: thin lilac/blue rim around lamps in the 1/4 preview): the GPU's bilinear filter mixes knee CODES (log per channel)
+// between a bright texel and a dark one; magnified 4x, that mix is a 1-2 px rim of the wrong hue. While a preview is drawn (pvLin), a knee
+// layer is read at its 4 texel centres, each decoded to linear light, then mixed - the filter in light, not in code.
+// VER-POSD 10a: lamp layers only (ehLuz); the sky/sun layers filtered in light spread a bright window over the wood in daylight.
+vec3 bilinDec(sampler2D tx, vec2 uv, vec2 ts, float kn, float kn2, float yb, float ym, float gL){
+  vec2 q = uv * ts - 0.5; vec2 f = fract(q); vec2 b = (floor(q) + 0.5) / ts; vec2 dx = vec2(1.0 / ts.x, 0.0), dy = vec2(0.0, 1.0 / ts.y);
+  vec3 a = decod(texture2D(tx, b).rgb, kn, kn2, yb, ym, gL), c = decod(texture2D(tx, b + dx).rgb, kn, kn2, yb, ym, gL);
+  vec3 d = decod(texture2D(tx, b + dy).rgb, kn, kn2, yb, ym, gL), e = decod(texture2D(tx, b + dx + dy).rgb, kn, kn2, yb, ym, gL);
+  return mix(mix(a, c, f.x), mix(d, e, f.x), f.y);
 }
 uniform vec3 wb;
 uniform float expo;
@@ -192,7 +204,7 @@ void main(){
 #ifdef COM_LO
   if (loIdx[${i}] > -0.5) { vec3 lo${i} = loTex(loIdx[${i}], vUvR); c${i} = c${i} * (4080.0 / 4095.0) + lo${i} * (15.0 / 4095.0); }
 #endif
-  vec3 d${i} = decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]);
+  vec3 d${i} = pvLin > 0.5 && joelho[${i}] > 0.0 && ehLuz[${i}] > 0.5 ? bilinDec(t[${i}], vUvR, tTam[${i}], joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]) : decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]);
   s += g[${i}] * esc[${i}] * d${i} * (1.0 - ehLuz[${i}] * foR); if (ehCeu[${i}] > 0.5) sF += esc[${i}] * d${i}; }`).join("\n  ")}
   if (usaVis > 0.5) {
     vec3 alb = pow(texture2D(tAlb, vUvR).rgb, vec3(2.2));
@@ -246,6 +258,14 @@ void main(){
   if (srgb > 0.5) o = mix(o * 12.92, 1.055 * pow(max(o, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, o));
   gl_FragColor = vec4(o, 1.0);
 }`;
+// 23/11 (VER-POSD 8a FAIL, LED pink/yellow with a blue rim in the 21:00 preview): a 12-bit light layer keeps joelho2 0.95 only thanks to its
+// -lo file; its 8-bit preview is coded with its own knees (montador monta_tour_v1.previa_joelhos, same rule): joelho 0.66, joelho2 so both
+// log segments have the same step. null = the layer's own knees.
+function previaJoelhos(c) {
+  if (!c || c.bits !== 12 || !c.joelho || !(c.ymax > c.y2) || !(c.y2 > 1)) return null;
+  const kn = 0.66;
+  return [kn, kn + (1 - kn) * Math.log(c.y2) / Math.log(c.ymax)];
+}
 const INFO = { tamanhos: /* @__PURE__ */ new Set(), decodificador: null };
 async function carregaTextura(url, max, dados = false, manterImagem = false, inteira = false) {
   if (inteira) max = 0;
@@ -392,6 +412,10 @@ class MisturaPonto {
     this.luzesOrdem = luzes;
     this.cfg = cena || {};   // MORADIA-CONSERTO 26/10: rbNoite, wbNoite, deband, solInterino, ceuMinLux, corCeuNoite ('cfg': this.cena is the THREE.Scene below)
     this.rbNoite = this.cfg.rbNoite || 1.25;
+    // 23/11: 1/4 previews of every layer (manifest cena.previas, montador gera_previas): a cold view is drawn with them first and refined to the
+    // full files as they arrive (the first view of a room took 30-44 s on a phone). ?previa=0 turns it off.
+    this.previa = this.cfg.previas && new URLSearchParams(location.search).get("previa") !== "0" ? this.cfg.previas : null;
+    this.prontas = new Set();
     {   // 09/11 VISOR-LUZ: look parameters (manifest 'cena' / point 'ref_branca'; the URL overrides are for A/B sheets only)
       const Q = new URLSearchParams(location.search), num = (k, m, d) => { const v = parseFloat(Q.get(k)); return Number.isFinite(v) ? v : Number.isFinite(m) ? m : d; };
       const cor = (k) => { const v = (Q.get(k) || "").split(",").map(Number); return v.length === 3 && v.every(Number.isFinite) ? v : null; };
@@ -469,6 +493,8 @@ class MisturaPonto {
         gamaL: { value: Array(7).fill(2.2) },
         y2: { value: Array(7).fill(2) },
         ymax: { value: Array(7).fill(4) },
+        pvLin: { value: 0 },
+        tTam: { value: Array.from({ length: 7 }, () => new THREE.Vector2(1, 1)) },
         wb: { value: new THREE.Vector3(1, 1, 1) },
         expo: { value: 1 },
         srgb: { value: 0 },
@@ -561,7 +587,11 @@ void main(){
   }
   textura(rel, dados = false, inteira = false) {
     if (!rel) return Promise.resolve(null);
-    if (!this.cache.has(rel)) this.cache.set(rel, carregaTextura(this.base + rel, this.max, dados, /(^|\/)fora[^/]*$/.test(rel), inteira));
+    if (!this.cache.has(rel)) {
+      const pr = carregaTextura(this.base + rel, this.max, dados, /(^|\/)fora[^/]*$/.test(rel), inteira);
+      this.cache.set(rel, pr);
+      pr.then((t) => { if (t && this.cache.get(rel) === pr) this.prontas.add(rel); }, () => {});
+    }
     const v = this.cache.get(rel);
     this.cache.delete(rel);
     this.cache.set(rel, v);
@@ -570,6 +600,7 @@ void main(){
       if (this.emUso && this.emUso.has(k)) continue;
       const p = this.cache.get(k);
       this.cache.delete(k);
+      this.prontas.delete(k);
       p.then((t) => t && t.dispose());
     }
     return v;
@@ -578,11 +609,13 @@ void main(){
     return this._naFila(() => {
       for (const p of this.cache.values()) p.then((t) => t && t.dispose());
       this.cache.clear();
+      this.prontas.clear();
     });
   }
   esquecerCamadas() {
     return this._naFila(() => {
       this.cache.clear();
+      this.prontas.clear();
       this._chaveLoc = null;
     });
   }
@@ -723,12 +756,24 @@ void main(){
     if (pl.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
     if (this.comLo) for (const it of pl.lista) if (it.c.lo) this.emUso.add(it.c.lo);
     if (C.fora) this.emUso.add(C.fora.arq);
-    const tDir = pl.dir ? await Promise.all([this.textura(C.albedo.arq), this.textura(C.normal.arq), ...visArq.map((a) => this.textura(a, true))]) : null;
+    // 23/11 previews: when any full layer of this state is not decoded yet, draw it with the 1/4 previews now and fetch the full files after
+    // them (not in parallel: the previews must not wait behind 30 MB); aoRefinar redraws with the full set.
+    const dirArqs = pl.dir ? [C.albedo.arq, C.normal.arq, ...visArq] : [];
+    const cheios = [...dirArqs, ...pl.lista.map((it) => it.c.arq)];
+    const pv = (a) => a.replace(/\.webp$/, this.previa);
+    const usaPrevia = !!this.previa && cheios.some((a) => !this.prontas.has(a) && !(this.baixados && this.baixados.has(a)));   // 25/11: a file already fetched in the background (tour360 adiantar) is decoded straight away
+    if (usaPrevia) for (const a of cheios) this.emUso.add(pv(a));
+    const qual = (a) => usaPrevia ? pv(a) : a;
+    const tDir = pl.dir ? await Promise.all(dirArqs.map((a, i) => this.textura(qual(a), i >= 2))) : null;
     if (pl.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
     const liga = (it) => it.g[0] + it.g[1] + it.g[2] > 0;   // a reference lamp that is off is measured (12 bits, like when it is on) but never drawn
     for (const it of pl.lista) if (it.c.lo && this.comLo) this.emUso.add(it.c.lo);
-    const loP = pl.lista.map((it) => it.c.lo && this.comLo ? this.textura(it.c.lo, false, true) : null);
-    const tx = await Promise.all(pl.lista.map((it) => this.textura(it.c.arq, false, !!it.c.joelho)));
+    const tx = await Promise.all(pl.lista.map((it) => this.textura(qual(it.c.arq), false, !!it.c.joelho)));
+    if (usaPrevia) Promise.all([...dirArqs.map((a, i) => this.textura(a, i >= 2)), ...pl.lista.map((it) => this.textura(it.c.arq, false, !!it.c.joelho))]).then(() => {
+      if (this.aoRefinar && !this.liberado) this.aoRefinar();
+    }).catch(() => {
+    });
+    const loP = pl.lista.map((it) => it.c.lo && this.comLo && !usaPrevia ? this.textura(it.c.lo, false, true) : null);
     const txLo = await Promise.all(loP.map((p) => p ? Promise.race([p, Promise.resolve(void 0)]) : null));
     if (this.liberado) return null;
     if (txLo.some((t) => t === void 0)) Promise.all(loP).then(() => {
@@ -737,6 +782,7 @@ void main(){
     });
     const U = this.mat.uniforms;
     U.semRefl.value = estado.reflexo === false ? 1 : 0;
+    U.pvLin.value = usaPrevia ? 1 : 0;   // 23/11: knee layers filtered in linear light while the previews are on screen (bilinDec)
     U.usaVis.value = tDir && tDir.every(Boolean) ? 1 : 0;
     if (U.usaVis.value) {
       U.tAlb.value = tDir[0];
@@ -764,6 +810,7 @@ void main(){
     for (let i = 0; i < 7; i++) {
       const it = pl.lista[i];
       U.t.value[i] = it && tx[i] || PRETO;
+      if (it && tx[i] && tx[i].userData.w) U.tTam.value[i].set(tx[i].userData.w, tx[i].userData.h);
       U.loIdx.value[i] = -1;
       if (it && txLo[i]) {
         const k = ordemLo.indexOf(i);
@@ -776,8 +823,9 @@ void main(){
       U.esc.value[i] = it ? it.c.escala : 1;
       U.ehLuz.value[i] = it && it.luz ? 1 : 0;
       U.ehCeu.value[i] = it && it.ceu ? 1 : 0;
-      U.joelho.value[i] = it && it.c.joelho || 0;
-      U.joelho2.value[i] = it && it.c.joelho2 || 0.95;
+      const pj = usaPrevia && it ? previaJoelhos(it.c) : null;   // 23/11: 12-bit layer drawn from its 8-bit preview = the preview's own knees
+      U.joelho.value[i] = pj ? pj[0] : it && it.c.joelho || 0;
+      U.joelho2.value[i] = pj ? pj[1] : it && it.c.joelho2 || 0.95;
       U.y2.value[i] = it && it.c.y2 || 2;
       U.ymax.value[i] = it && it.c.ymax || 4;
       U.gamaL.value[i] = it && it.c.gama || 2.2;

@@ -1,0 +1,1 @@
+import{t as e}from"./preload-helper.k4ZjFjQO.js";var t=document.querySelector(`.topo .poster img`),n=!1,r=()=>document.documentElement.setAttribute(`data-pagina-pronta`,``),i=()=>{n||(n=!0,e(()=>import(`./pagina.P6MjbNfI.js`).then(r,r),[]))};!t||t.complete&&t.naturalWidth>0?i():(t.addEventListener(`load`,i,{once:!0}),t.addEventListener(`error`,i,{once:!0}),setTimeout(i,4e3));
